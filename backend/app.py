@@ -81,7 +81,7 @@ def decode_image(image_bytes):
     return None
 
 # --- ADMIN CONFIGURATION ---
-ADMIN_IDS = ["69f9e0d64957cbcc423c7410", "69fa1163d676d11942bb4662"] # Old and New Admin
+ADMIN_IDS = ["69f9e0d64957cbcc423c7410", "69fa1163d676d11942bb4662", "69f9e329fdeed38be66669702"] # Old, New, and Image-referenced Admin
 
 # --- CLOUDFLARE R2 CONFIGURATION ---
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "idealtrendzzz")
@@ -556,11 +556,11 @@ def crop_image():
 @app.route('/api/filters', methods=['GET'])
 def get_filters():
     user_id = request.args.get('user_id') or request.headers.get('X-User-ID')
-    if not user_id or user_id in ['undefined', 'null', 'None']:
-        return jsonify([])
-    
     # Show materials from the current user PLUS materials from the Admin (Unified Library)
-    query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
+    if not user_id or user_id in ['undefined', 'null', 'None']:
+        query = {"user_id": {"$in": ADMIN_IDS}}
+    else:
+        query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
     rows = list(filters_col.find(query).sort("created_at", -1))
     
     filters = []
@@ -580,11 +580,11 @@ def get_filters():
 @app.route('/api/extracted-textures', methods=['GET'])
 def get_extracted_textures():
     user_id = request.args.get('user_id') or request.headers.get('X-User-ID')
-    if not user_id or user_id in ['undefined', 'null', 'None']:
-        return jsonify([])
-    
     # Show materials from the current user PLUS materials from the Admin (Unified Library)
-    query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
+    if not user_id or user_id in ['undefined', 'null', 'None']:
+        query = {"user_id": {"$in": ADMIN_IDS}}
+    else:
+        query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
     rows = list(filters_col.find(query).sort("created_at", -1))
     
     textures = []
@@ -602,11 +602,11 @@ def get_extracted_textures():
 @app.route('/api/products', methods=['GET'])
 def get_products():
     user_id = request.args.get('user_id') or request.headers.get('X-User-ID')
-    if not user_id or user_id in ['undefined', 'null', 'None']:
-        return jsonify([])
-    
     # Show materials from the current user PLUS materials from the Admin (Unified Library)
-    query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
+    if not user_id or user_id in ['undefined', 'null', 'None']:
+        query = {"user_id": {"$in": ADMIN_IDS}}
+    else:
+        query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
     rows = list(filters_col.find(query).sort("created_at", -1))
     
     products = []

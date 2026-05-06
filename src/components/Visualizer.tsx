@@ -11,8 +11,11 @@ export default function Visualizer({ room, onBack, userId }: { room: any, onBack
   const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
-    if (!userId) return;
-    fetch(`http://localhost:5000/api/products?user_id=${userId}`)
+    const url = userId 
+      ? `http://localhost:5000/api/products?user_id=${userId}`
+      : `http://localhost:5000/api/products`;
+      
+    fetch(url)
       .then(res => res.json())
       .then(data => {
         // Enhance products with size and finish to match screenshot
@@ -173,8 +176,18 @@ export default function Visualizer({ room, onBack, userId }: { room: any, onBack
 
         {/* Main Preview Area */}
         <main className="flex-1 relative flex flex-col bg-[#f0f2f5]">
-           <div className="flex-1 relative flex items-center justify-center p-4 sm:p-8">
-              <div className="relative w-full max-w-4xl shadow-2xl rounded-xl overflow-hidden bg-white">
+           <div className="flex-1 relative overflow-hidden bg-gray-900 flex items-center justify-center">
+              {/* Blurred Background Layer */}
+              <div className="absolute inset-0 z-0">
+                <img 
+                  src={room.image} 
+                  className="w-full h-full object-cover blur-2xl opacity-30 scale-110"
+                  alt=""
+                />
+                <div className="absolute inset-0 bg-black/40" />
+              </div>
+
+              <div className="relative z-10 w-full max-w-[95vw] lg:max-w-7xl max-h-[85vh] lg:max-h-[88vh] shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl overflow-hidden bg-white ring-1 ring-white/10">
                 <img src={room.image} alt={room.name} className="w-full h-full object-cover" />
                 {activeProduct?.type === 'wall' && (
                   <div

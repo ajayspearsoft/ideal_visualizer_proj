@@ -20,6 +20,7 @@ export default function CustomUploadVisualizer({ onBack, onLogout, userName, use
   const [showSidebar, setShowSidebar] = useState(false)
   const [filterCategory, setFilterCategory] = useState('All')
   const [filterStyle, setFilterStyle] = useState('All')
+  const [zoom, setZoom] = useState(1.1) // Reset zoom to a safer 1.1x default
   const requestIdRef = useRef(0)
 
   const handleSaveDesign = () => {
@@ -62,9 +63,11 @@ export default function CustomUploadVisualizer({ onBack, onLogout, userName, use
   }, [userId])
 
   const fetchExtractedTextures = async () => {
-    if (!userId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/extracted-textures?user_id=${userId}`)
+      const url = userId 
+        ? `http://localhost:5000/api/extracted-textures?user_id=${userId}`
+        : `http://localhost:5000/api/extracted-textures`;
+      const res = await fetch(url)
       const data = await res.json()
       setExtractedTextures(data)
     } catch (err) {
@@ -234,7 +237,7 @@ export default function CustomUploadVisualizer({ onBack, onLogout, userName, use
       </header>
 
       <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
-        <aside className={`${!wallPreview ? 'hidden' : 'flex'} order-2 lg:order-1 w-full lg:w-[360px] h-[280px] lg:h-full bg-white border-t lg:border-t-0 lg:border-r border-gray-200 shrink-0 flex-col z-10 shadow-sm transition-all duration-300`}>
+        <aside className={`${!wallPreview ? 'hidden' : 'flex'} order-2 lg:order-1 w-full lg:w-[360px] h-[220px] sm:h-[280px] lg:h-full bg-white border-t lg:border-t-0 lg:border-r border-gray-200 shrink-0 flex-col z-10 shadow-sm transition-all duration-300`}>
           <div className="p-3 lg:p-5 border-b border-gray-100 flex flex-col gap-1 lg:gap-4 shrink-0">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-gray-800 text-[10px] lg:text-base uppercase tracking-wider">Material Library</h3>
@@ -298,53 +301,74 @@ export default function CustomUploadVisualizer({ onBack, onLogout, userName, use
             </div>
           )}
 
-          <div className="flex-1 p-4 sm:p-8 flex items-center justify-center relative overflow-hidden">
+          <div className="flex-1 relative overflow-hidden bg-gray-900 flex items-center justify-center">
             {wallPreview ? (
-              <div className="relative inline-flex max-w-full max-h-full rounded-2xl shadow-2xl overflow-hidden bg-white ring-1 ring-black/5 group">
-                <img 
-                  ref={imageRef}
-                  src={compareMode ? wallPreview : (resultImage || wallPreview)} 
-                  className={`max-w-full max-h-[calc(100vh-28rem)] sm:max-h-[calc(100vh-14rem)] object-contain cursor-crosshair transition-opacity duration-300 ${processing ? 'opacity-60 blur-[1px]' : 'opacity-100'}`}
-                  onClick={handleImageClick}
-                  alt="Wall preview"
-                />
+              <>
+                {/* Blurred Background Layer */}
+                <div className="absolute inset-0 z-0">
+                  <img 
+                    src={compareMode ? wallPreview : (resultImage || wallPreview)} 
+                    className="w-full h-full object-cover blur-2xl opacity-40 scale-110"
+                    alt=""
+                  />
+                  <div className="absolute inset-0 bg-black/20" />
+                </div>
 
-                {/* Mobile Horizontal Filter Bar (Bottom Slider) */}
-                
-                {/* Visual Click Indicator */}
-                {visualClick && !compareMode && (
-                  <div 
-                    className="absolute w-6 h-6 -ml-3 -mt-3 pointer-events-none z-10 flex items-center justify-center transition-all duration-300"
-                    style={{ left: `${visualClick.x}%`, top: `${visualClick.y}%` }}
-                  >
-                    <div className="absolute inset-0 bg-white/30 rounded-full animate-ping"></div>
-                    <div className="w-2.5 h-2.5 bg-white rounded-full shadow-[0_0_12px_rgba(0,0,0,0.6)] border-2 border-gray-900"></div>
-                  </div>
-                )}
+                {/* Main Image Layer - fills entire available space */}
+                <div className="absolute inset-0 z-10 flex items-center justify-center p-3 sm:p-5 group">
+                  <img 
+                    ref={imageRef}
+                    src={compareMode ? wallPreview : (resultImage || wallPreview)} 
+                    className={`w-full h-full object-contain rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.6)] cursor-crosshair transition-opacity duration-300 ${processing ? 'opacity-60 blur-[1px]' : 'opacity-100'}`}
+                    onClick={handleImageClick}
+                    alt="Wall preview"
+                  />
 
-                {processing && (
-                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/5">
-                    <div className="bg-white/95 backdrop-blur-md px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4">
-                      <div className="relative flex h-6 w-6">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gray-900 opacity-20"></span>
-                        <span className="relative inline-flex rounded-full h-6 w-6 bg-gray-900 items-center justify-center">
-                           <svg className="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        </span>
+                  {/* Visual Click Indicator */}
+                  {visualClick && !compareMode && (
+                    <div 
+                      className="absolute w-6 h-6 -ml-3 -mt-3 pointer-events-none z-20 flex items-center justify-center transition-all duration-300"
+                      style={{ left: `${visualClick.x}%`, top: `${visualClick.y}%` }}
+                    >
+                      <div className="absolute inset-0 bg-white/30 rounded-full animate-ping"></div>
+                      <div className="w-2.5 h-2.5 bg-white rounded-full shadow-[0_0_12px_rgba(0,0,0,0.6)] border-2 border-gray-900"></div>
+                    </div>
+                  )}
+
+                  {processing && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/5">
+                      <div className="bg-white/95 backdrop-blur-md px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4">
+                        <div className="relative flex h-6 w-6">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gray-900 opacity-20"></span>
+                          <span className="relative inline-flex rounded-full h-6 w-6 bg-gray-900 items-center justify-center">
+                             <svg className="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                          </span>
+                        </div>
+                        <span className="font-bold text-gray-900 text-sm tracking-wide">Processing Wall...</span>
                       </div>
-                      <span className="font-bold text-gray-900 text-sm tracking-wide">Processing Wall...</span>
                     </div>
+                  )}
+
+                  {/* Zoom Controls */}
+                  <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-30 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => { e.stopPropagation(); setZoom(prev => Math.min(prev + 0.1, 2)) }} className="w-8 h-8 bg-white/80 backdrop-blur rounded-lg shadow-lg flex items-center justify-center hover:bg-white text-gray-800">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); setZoom(prev => Math.max(prev - 0.1, 0.5)) }} className="w-8 h-8 bg-white/80 backdrop-blur rounded-lg shadow-lg flex items-center justify-center hover:bg-white text-gray-800">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
+                    </button>
                   </div>
-                )}
-                
-                {!resultImage && !processing && (
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/5">
-                    <div className="bg-gray-900/90 backdrop-blur text-white px-5 py-2.5 rounded-xl font-medium text-sm shadow-xl flex items-center gap-2">
-                      <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
-                      Click to set target area
+
+                  {!resultImage && !processing && (
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/5">
+                      <div className="bg-gray-900/90 backdrop-blur text-white px-5 py-2.5 rounded-xl font-medium text-sm shadow-xl flex items-center gap-2">
+                        <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
+                        Click to set target area
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              </>
             ) : (
               <div 
                 className={`w-full max-w-2xl aspect-[16/10] border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center transition-all duration-300 ${isDragging ? 'border-gray-900 bg-gray-100 scale-[1.02]' : 'border-gray-300 bg-white hover:border-gray-400 hover:bg-gray-50 shadow-sm'}`}
