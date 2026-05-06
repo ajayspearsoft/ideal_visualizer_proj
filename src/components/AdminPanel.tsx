@@ -18,7 +18,8 @@ import {
   Copy,
   ExternalLink,
   AlertCircle,
-  RotateCcw
+  RotateCcw,
+  Edit3
 } from 'lucide-react'
 
 interface FilterItem {
@@ -69,6 +70,7 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
   const [detectedCodes, setDetectedCodes] = useState<DetectedCode[]>([])
   const [clickPos, setClickPos] = useState<{ x: number, y: number } | null>(null)
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
+  const [manualCode, setManualCode] = useState('')
   const [toast, setToast] = useState<{ message: string, type: 'info' | 'success' | 'warning' } | null>(null)
 
   const showToast = (message: string, type: 'info' | 'success' | 'warning' = 'info') => {
@@ -205,7 +207,9 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
     setZoom(1)
     setActiveIndex(null)
     setDetectedCodes([])
+    setManualCode('')
     setMode('crop')
+    setMobileTab('canvas')
   }
 
   const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -225,8 +229,16 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
 
     setCropping(true)
     try {
-      const scaleX = imgDimensions.naturalWidth / imgDimensions.width
-      const scaleY = imgDimensions.naturalHeight / imgDimensions.height
+      // PRO FIX: Calculate scale based on ACTUAL rendered dimensions at this moment
+      if (!imgRef.current) throw new Error("Image reference not found");
+      
+      const displayedWidth = imgRef.current.width;
+      const displayedHeight = imgRef.current.height;
+      const naturalWidth = imgRef.current.naturalWidth;
+      const naturalHeight = imgRef.current.naturalHeight;
+
+      const scaleX = naturalWidth / displayedWidth;
+      const scaleY = naturalHeight / displayedHeight;
 
       const cropData = {
         page_url: selectedPage,
@@ -234,6 +246,8 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
         y: completedCrop.y * scaleY,
         width: completedCrop.width * scaleX,
         height: completedCrop.height * scaleY,
+        manual_code: manualCode,
+        detected_codes: detectedCodes // Pass pre-detected codes for nearest-match association
       }
 
       // Call api/crop which now handles BOTH cropping and saving to MongoDB
@@ -261,9 +275,10 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
       setFilters(prev => [newFilter, ...prev])
       fetchFilters()
       setActiveIndex(0)
+      setManualCode('') // Clear manual code after successful commit
       
       showToast('Material committed successfully!', 'success')
-      if (data.code === 'UNKNOWN') {
+      if (data.code === 'UNKNOWN' && !manualCode) {
         showToast('Code not detected, edit manually.', 'info')
       }
 
@@ -539,7 +554,7 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
               </div>
 
               {/* LEFT: Toolbar */}
-              <div className={`${mobileTab === 'canvas' ? 'flex' : 'hidden'} lg:flex w-full lg:w-80 border-r border-gray-100 flex-col bg-slate-50/30 shrink-0`}>
+              <div className={`${mobileTab === 'canvas' ? 'flex' : 'hidden'} lg:flex w-full lg:w-80 border-r border-gray-100 flex-col bg-slate-50/30 shrink-0 overflow-y-auto`}>
                  <div className="p-6 space-y-8">
                     <div className="space-y-4">
                        <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em]">Precision Tools</h3>
@@ -551,10 +566,79 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
                              </div>
                              <input type="range" min="1" max="4" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-full h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
                           </div>
-                          <button onClick={handleAddToGrid} disabled={!completedCrop || cropping} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-30 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3">
-                             {cropping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Commit Selection
-                          </button>
+                           <div className="space-y-3">
+                              <span className="text-[10px] font-black text-gray-400 uppercase">Manual Code Entry</span>
+                              <div className="relative">
+                                 <input 
+                                   type="text" 
+                                   value={manualCode} 
+                                   onChange={(e) => {
+                                      const val = e.target.value.toUpperCase();
+                                      setManualCode(val);
+                                      // Optional: auto-focus if matches a detected code
+                                      const match = detectedCodes.find(d => d.code === val);
+                                      if (match) {
+                                         const sX = imgDimensions.naturalWidth / imgDimensions.width;
+                                         const sY = imgDimensions.naturalHeight / imgDimensions.height;
+                                         const nc: Crop = {
+                                            unit: 'px',
+                                            x: match.left / sX,
+                                            y: match.top / sY,
+                                            width: match.width / sX,
+                                            height: match.height / sY
+                                         };
+                                         setCrop(nc);
+                                         setCompletedCrop(nc as PixelCrop);
+                                      }
+                                   }}
+                                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-black uppercase outline-none focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-50 transition-all pr-10"
+                                   placeholder="TYPE CODE..."
+                                 />
+                                 <Edit3 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
+                              </div>
+                           </div>
+                           <button onClick={handleAddToGrid} disabled={!completedCrop || cropping} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-30 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3">
+                              {cropping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Commit Selection
+                           </button>
                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                       <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em]">Detected Codes</h3>
+                       {detectedCodes.length > 0 ? (
+                         <div className="flex flex-wrap gap-2">
+                           {detectedCodes.map((d, i) => (
+                             <button 
+                               key={i} 
+                               onClick={() => {
+                                 const sX = imgDimensions.naturalWidth / imgDimensions.width;
+                                 const sY = imgDimensions.naturalHeight / imgDimensions.height;
+                                 const nc: Crop = {
+                                   unit: 'px',
+                                   x: d.left / sX,
+                                   y: d.top / sY,
+                                   width: d.width / sX,
+                                   height: d.height / sY
+                                 };
+                                 setCrop(nc);
+                                 setCompletedCrop(nc as PixelCrop);
+                                 setManualCode(d.code);
+                               }}
+                               className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all shadow-sm border ${
+                                 manualCode === d.code 
+                                   ? 'bg-indigo-600 border-indigo-600 text-white' 
+                                   : 'bg-white border-gray-200 text-gray-700 hover:border-indigo-600 hover:text-indigo-600'
+                               }`}
+                             >
+                               {d.code}
+                             </button>
+                           ))}
+                         </div>
+                       ) : (
+                         <div className="bg-gray-100 rounded-2xl p-4 text-center">
+                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">No codes detected yet</p>
+                         </div>
+                       )}
                     </div>
 
                     <div className="space-y-4">
@@ -593,13 +677,16 @@ export default function AdminPanel({ onBack, onLogout, userName, userId }: { onB
                                <img src={filter.url} className="w-full h-full object-cover" />
                             </div>
                             <div className="flex-1 space-y-3 min-w-0">
-                               <input 
-                                 type="text" 
-                                 value={filter.code} 
-                                 onChange={(e) => { const n = [...filters]; n[i].code = e.target.value.toUpperCase(); setFilters(n); }} 
-                                 className={`w-full bg-transparent text-sm font-black uppercase outline-none ${filter.code === 'UNKNOWN' ? 'text-red-500' : 'text-gray-900'}`}
-                                 placeholder="ASSIGN CODE..."
-                               />
+                               <div className="relative group/input">
+                                 <input 
+                                   type="text" 
+                                   value={filter.code} 
+                                   onChange={(e) => { const n = [...filters]; n[i].code = e.target.value.toUpperCase(); setFilters(n); }} 
+                                   className={`w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black uppercase outline-none focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-50 transition-all ${filter.code === 'UNKNOWN' ? 'text-red-500 border-red-200 bg-red-50' : 'text-gray-900'}`}
+                                   placeholder="ASSIGN CODE..."
+                                 />
+                                 <Edit3 className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 opacity-0 group-hover/input:opacity-100 transition-opacity pointer-events-none" />
+                               </div>
                                <div className="flex gap-2">
                                   <button onClick={(e) => { e.stopPropagation(); handleSaveFilter(i); }} className="flex-1 bg-gray-900 text-white py-2 rounded-xl text-[10px] font-black uppercase hover:bg-black transition-all">COMMIT</button>
                                   <button onClick={(e) => { e.stopPropagation(); handleDeleteFilter(i); }} className="p-2 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>

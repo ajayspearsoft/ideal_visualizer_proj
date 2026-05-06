@@ -1,5 +1,26 @@
 import os
 import time
+
+# ==========================================
+# CRITICAL: LOAD ENVIRONMENT FIRST
+# ==========================================
+from dotenv import load_dotenv, find_dotenv
+try:
+    # Use absolute path to find the root .env
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(current_dir)
+    root_env = os.path.join(root_dir, '.env')
+    
+    print(f"\n🌟 [ENV CHECK] Loading root .env from: {root_env}", flush=True)
+    if os.path.exists(root_env):
+        load_dotenv(root_env, override=True)
+        print(f"✅ [ENV CHECK] Root .env loaded successfully.", flush=True)
+    else:
+        print(f"⚠️ [ENV CHECK] Root .env NOT FOUND at {root_env}. Falling back to find_dotenv().", flush=True)
+        load_dotenv(find_dotenv(), override=True)
+except Exception as e:
+    print(f"❌ [ENV CHECK] Failed to load .env: {e}", flush=True)
+
 import cv2
 import numpy as np
 import torch
@@ -20,9 +41,6 @@ from segment_anything import sam_model_registry, SamPredictor
 from ultralytics import YOLO
 from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
 import torch.nn as nn
-
-# Load environment variables
-load_dotenv()
 
 def decode_image(image_bytes):
     """Robustly decode image from bytes using OpenCV, PIL, and Base64 fallbacks."""
@@ -62,6 +80,9 @@ def decode_image(image_bytes):
 
     return None
 
+# --- ADMIN CONFIGURATION ---
+ADMIN_IDS = ["69f9e0d64957cbcc423c7410", "69fa1163d676d11942bb4662"] # Old and New Admin
+
 # --- CLOUDFLARE R2 CONFIGURATION ---
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "idealtrendzzz")
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
@@ -80,6 +101,9 @@ r2_client = boto3.client(
 
 def upload_to_r2(file_data, object_name, content_type='image/png'):
     try:
+        if not R2_ACCOUNT_ID or not R2_ACCESS_KEY_ID:
+            raise ValueError("Cloudflare R2 configuration is missing in the .env file.")
+
         if isinstance(file_data, str):
             with open(file_data, 'rb') as f:
                 data = f.read()
@@ -91,10 +115,11 @@ def upload_to_r2(file_data, object_name, content_type='image/png'):
             Body=data,
             ContentType=content_type
         )
-        return f"{R2_PUBLIC_URL}/{object_name}"
+        return f"{R2_PUBLIC_URL}/{object_name}", None
     except Exception as e:
-        print(f"R2 Upload Error: {e}")
-        return None
+        error_msg = str(e)
+        print(f"R2 Upload Error: {error_msg}")
+        return None, error_msg
 
 # --- MONGODB CONFIGURATION ---
 MONGO_URL = os.getenv("MONGODB_URL")
@@ -102,6 +127,7 @@ DB_NAME = os.getenv("DATABASE_NAME", "idealtredz")
 
 mongo_client = MongoClient(MONGO_URL)
 db = mongo_client[DB_NAME]
+print(f"📊 [DATABASE] Using MongoDB Database: {DB_NAME}", flush=True)
 
 # Collections
 users_col = db["users"]
@@ -292,17 +318,14 @@ def upload_pdf():
         # Upload PDF to R2
         user_prefix = f"{user_id}" if user_id else "anonymous"
         r2_pdf_path = f"{user_prefix}/pdfs/{pdf_id}/{pdf_filename}"
-        public_pdf_url = upload_to_r2(final_pdf_path, r2_pdf_path, 'application/pdf')
+        public_pdf_url, pdf_err = upload_to_r2(final_pdf_path, r2_pdf_path, 'application/pdf')
         
-        # DELETE local PDF immediately after upload
-        if os.path.exists(final_pdf_path): os.remove(final_pdf_path)
+        if pdf_err:
+            if os.path.exists(final_pdf_path): os.remove(final_pdf_path)
+            return jsonify({'error': f'Failed to upload PDF document: {pdf_err}'}), 500
 
-        # Re-open (from memory or temporary location if needed, but here we still have fitz handles)
-        # Actually, fitz needs a path or bytes. Since we just deleted the file, we should have opened it first.
-        # Let's re-save temporarily for page extraction then delete.
-        
-        file.seek(0)
-        doc = fitz.open(stream=file.read(), filetype="pdf")
+        # Extract pages from the local file before deleting
+        doc = fitz.open(final_pdf_path)
         page_urls = []
         
         for i in range(page_count):
@@ -312,13 +335,19 @@ def upload_pdf():
             
             # Upload Page Image directly to R2 from bytes (no local file)
             r2_img_path = f"{user_prefix}/pdfs/{pdf_id}/pages/page_{i}.png"
-            public_url = upload_to_r2(img_bytes, r2_img_path, 'image/png')
+            public_url, page_err = upload_to_r2(img_bytes, r2_img_path, 'image/png')
+            
             if public_url:
                 page_urls.append(public_url)
             else:
-                return jsonify({'error': 'Failed to upload page to cloud storage.'}), 500
+                doc.close()
+                if os.path.exists(final_pdf_path): os.remove(final_pdf_path)
+                return jsonify({'error': f'Failed to upload page {i+1} to cloud storage: {page_err}'}), 500
         
         doc.close()
+        
+        # DELETE local PDF immediately after upload and extraction
+        if os.path.exists(final_pdf_path): os.remove(final_pdf_path)
         
         return jsonify({
             'success': True,
@@ -356,13 +385,12 @@ def delete_pdf():
 
     try:
         # Check ownership or admin status before deletion
-        ADMIN_ID = "69f9e0d64957cbcc423c7410"
         pdf_item = pdfs_col.find_one({"_id": ObjectId(pdf_id)})
         
         if not pdf_item:
             return jsonify({'error': 'PDF not found'}), 404
             
-        if str(pdf_item.get("user_id")) != str(user_id) and str(user_id) != ADMIN_ID:
+        if str(pdf_item.get("user_id")) != str(user_id) and str(user_id) not in ADMIN_IDS:
             return jsonify({'error': 'Permission denied'}), 403
             
         pdfs_col.delete_one({"_id": ObjectId(pdf_id)})
@@ -462,22 +490,52 @@ def crop_image():
     # Upload to R2
     user_prefix = f"{user_id}" if user_id else "anonymous"
     r2_crop_path = f"{user_prefix}/filters/{crop_name}"
-    public_url = upload_to_r2(cropped_bytes, r2_crop_path, 'image/png')
+    public_url, upload_err = upload_to_r2(cropped_bytes, r2_crop_path, 'image/png')
     
     if not public_url:
-        return jsonify({'error': 'Failed to save material to cloud storage.'}), 500
+        return jsonify({'error': f'Failed to save material to cloud storage: {upload_err}'}), 500
 
     # Perform OCR on the crop to see if a code is inside it
-    detected_code = extract_code_ocr(cropped, (real_w // 2, real_h // 2))
+    manual_code = data.get('manual_code')
+    detected_codes_from_ui = data.get('detected_codes', []) # Optional: list of codes already found on page
     
-    # ... radial search ...
-    # Radial search fallback...
-    if not detected_code:
-        search_margin = 150
-        search_y = max(0, real_y - search_margin)
-        search_h = min(ih - search_y, real_h + (search_margin * 2))
-        search_area = image[search_y:search_y+search_h, real_x:real_x+real_w]
-        detected_code = extract_code_ocr(search_area, (real_w // 2, real_h // 2 + search_margin))
+    # Debug: Save the raw crop
+    cv2.imwrite("debug_crop.png", cropped)
+    
+    if manual_code:
+        detected_code = manual_code
+    else:
+        # 1. Try OCR directly on the crop
+        detected_code = extract_code_ocr(cropped, (real_w // 2, real_h // 2))
+        
+        # 2. If not found, search specifically BELOW the crop (standard catalog layout)
+        if not detected_code:
+            search_margin = 250 # Pixels to look below
+            search_top = real_y + real_h
+            search_bottom = min(ih, search_top + search_margin)
+            
+            # Extract search area (only below)
+            search_area = image[search_top:search_bottom, real_x:real_x+real_w]
+            
+            if search_area.size > 0:
+                # Debug: Save the search area
+                cv2.imwrite("debug_search.png", search_area)
+                detected_code = extract_code_ocr(search_area, (real_w // 2, search_margin // 2))
+
+        # 3. Last Resort: Find the nearest code from the UI's pre-detected list
+        if not detected_code and detected_codes_from_ui:
+            best_dist = float('inf')
+            # Look for codes near the bottom-center of the crop
+            target_x = real_x + real_w // 2
+            target_y = real_y + real_h
+            
+            for d in detected_codes_from_ui:
+                # d should have {code, x, y} in natural image coordinates
+                dist = ((d['x'] - target_x)**2 + (d['y'] - target_y)**2)**0.5
+                if dist < 500 and dist < best_dist: # 500px radius
+                    best_dist = dist
+                    detected_code = d['code']
+                    print(f"✅ Associated with nearest pre-detected code: {detected_code} (dist: {dist:.1f})")
 
     # Save to MongoDB
     filter_data = {
@@ -502,8 +560,7 @@ def get_filters():
         return jsonify([])
     
     # Show materials from the current user PLUS materials from the Admin (Unified Library)
-    ADMIN_ID = "69f9e0d64957cbcc423c7410"
-    query = {"$or": [{"user_id": str(user_id)}, {"user_id": ADMIN_ID}]}
+    query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
     rows = list(filters_col.find(query).sort("created_at", -1))
     
     filters = []
@@ -527,8 +584,7 @@ def get_extracted_textures():
         return jsonify([])
     
     # Show materials from the current user PLUS materials from the Admin (Unified Library)
-    ADMIN_ID = "69f9e0d64957cbcc423c7410"
-    query = {"$or": [{"user_id": str(user_id)}, {"user_id": ADMIN_ID}]}
+    query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
     rows = list(filters_col.find(query).sort("created_at", -1))
     
     textures = []
@@ -550,8 +606,7 @@ def get_products():
         return jsonify([])
     
     # Show materials from the current user PLUS materials from the Admin (Unified Library)
-    ADMIN_ID = "69f9e0d64957cbcc423c7410"
-    query = {"$or": [{"user_id": str(user_id)}, {"user_id": ADMIN_ID}]}
+    query = {"$or": [{"user_id": str(user_id)}, {"user_id": {"$in": ADMIN_IDS}}]}
     rows = list(filters_col.find(query).sort("created_at", -1))
     
     products = []
@@ -579,13 +634,12 @@ def delete_filter():
     
     try:
         # Check ownership or admin status before deletion
-        ADMIN_ID = "69f9e0d64957cbcc423c7410"
         filter_item = filters_col.find_one({"_id": ObjectId(id)})
         
         if not filter_item:
             return jsonify({'error': 'Filter not found'}), 404
             
-        if filter_item["user_id"] != str(user_id) and str(user_id) != ADMIN_ID:
+        if filter_item["user_id"] != str(user_id) and str(user_id) not in ADMIN_IDS:
             return jsonify({'error': 'Permission denied'}), 403
             
         filters_col.delete_one({"_id": ObjectId(id)})
@@ -648,17 +702,22 @@ def detect_codes():
             text = text.replace("–", "-").replace("—", "-")
             return text.strip()
 
-        # Using EasyOCR
-        results = ocr_reader.readtext(gray)
-        # Flexible regex for WK codes: WK followed by numbers, optional spaces, optional dash, numbers
-        wk_pattern = re.compile(r'WK\d+\s*[-–—]?\s*\d+', re.IGNORECASE)
+        # Using EasyOCR with multiple thresholded images for maximum accuracy
+        # Combine results from original gray and thresholded images
+        all_results = ocr_reader.readtext(gray)
+        all_results += ocr_reader.readtext(thresh2) # OTSU threshold often works best
         
-        for (bbox, text, prob) in results:
+        # Robust regex for WK codes: allows for common OCR misreads (O instead of 0, etc)
+        wk_pattern = re.compile(r'WK[0-9OIlS\-\s]{2,10}', re.IGNORECASE)
+        
+        for (bbox, text, prob) in all_results:
             if not text: continue
             
             match = wk_pattern.search(text)
             if match:
-                code = normalize_code(match.group(0)).upper()
+                code = normalize_code(match.group(0))
+                if len(code) < 4: continue # Skip noise
+                
                 # EasyOCR bbox is [[tl_x, tl_y], [tr_x, tr_y], [br_x, br_y], [bl_x, bl_y]]
                 # We need to scale back if we resized (though we're using gray which was scaled)
                 (tl, tr, br, bl) = bbox
@@ -699,18 +758,42 @@ def detect_codes():
 # ==========================================
 
 def normalize_code(text):
-    text = text.replace(" ", "")
+    """
+    Standardizes material codes and corrects common OCR misreads.
+    Example: WK16O-O6 -> WK160-06
+    """
+    if not text: return ""
+    # Remove whitespace and standardize dashes
+    text = re.sub(r'\s+', '', text)
     text = text.replace("–", "-").replace("—", "-")
-    return text.strip()
+    
+    # OCR Correction logic (Dynamic, not hardcoded to specific codes)
+    if text.upper().startswith("WK"):
+        prefix = text[:2].upper()
+        rest = text[2:]
+        # Correct common digit/letter confusions in the numeric part
+        rest = rest.replace('O', '0').replace('o', '0')
+        rest = rest.replace('I', '1').replace('l', '1')
+        rest = rest.replace('S', '5').replace('s', '5')
+        text = prefix + rest
+        
+    return text.strip().upper()
 
 def extract_code_regex(text):
+    """
+    Regex patterns that are robust to OCR misreads but strict on format.
+    Ensures full codes like WK160-28 are captured, not just WK160.
+    """
+    # Strict catalog pattern: WK followed by 3 digits, dash, 2-3 digits
+    # Allowing O for 0, I for 1 etc. as they are corrected in normalize_code
     patterns = [
-        r'[A-Z]{1,3}\d{2,5}-\d{1,3}',   # WK160-27
-        r'[A-Z]{1,3}\d{2,5}',          # WK160
-        r'\d{4,}'                      # 12345
+        r'WK[0-9OIlS]{3}-[0-9OIlS]{2,3}', # Preferred full match: WK160-28
+        r'[A-Z]{1,3}[0-9OIlS]{3,5}-[0-9OIlS]{1,3}', # General fallback
+        r'WK[0-9OIlS]{3,5}', # Partial but specific prefix
+        r'[0-9OIlS]{5,}' # Numeric only fallback
     ]
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return normalize_code(match.group(0))
     return ""
@@ -1320,11 +1403,13 @@ def process_wall():
         # Upload result to R2
         user_prefix = f"{user_id}" if user_id else "anonymous"
         r2_res_path = f"{user_prefix}/results/{res_filename}"
-        public_url = upload_to_r2(buffer.tobytes(), r2_res_path, 'image/jpeg')
+        public_url, upload_err = upload_to_r2(buffer.tobytes(), r2_res_path, 'image/jpeg')
 
         if not public_url:
-            return jsonify({'error': 'Failed to save result to cloud storage.'}), 500
+            print(f"❌ R2 Result Upload Failed: {upload_err}")
+            return jsonify({'error': f'Failed to save result to cloud storage: {upload_err}'}), 500
 
+        print(f"✅ Wall Processed Successfully. Result: {public_url}")
         return jsonify({'resultUrl': public_url})
 
     except Exception as e:
@@ -1465,12 +1550,14 @@ def signup():
 def login():
     data = request.json
     # Handle both 'identifier' (Admin) and 'email' (Legacy User) keys
-    identifier = data.get('identifier') or data.get('email')
-    password = data.get('password')
+    identifier = (data.get('identifier') or data.get('email', '')).strip()
+    password = (data.get('password', '')).strip()
 
     if not identifier or not password:
+        print(f"⚠️ [LOGIN DEBUG] Missing credentials in request: {data}")
         return jsonify({'success': False, 'message': 'Missing credentials'}), 400
 
+    print(f"🔑 [LOGIN DEBUG] Attempt for identifier: {identifier}")
     # Search by email or mobile to support all login types
     user = users_col.find_one({
         "$or": [
@@ -1479,7 +1566,12 @@ def login():
         ]
     })
 
-    if user and check_password_hash(user["password"], password):
+    if not user:
+        print(f"❌ [LOGIN DEBUG] User NOT FOUND in database for: {identifier}")
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+    if check_password_hash(user["password"], password):
+        print(f"✅ [LOGIN DEBUG] Password MATCHED for: {identifier}")
         return jsonify({
             'success': True,
             'user': {
@@ -1489,6 +1581,7 @@ def login():
             }
         })
     
+    print(f"❌ [LOGIN DEBUG] Password MISMATCH for: {identifier}")
     return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
 if __name__ == '__main__':
@@ -1501,5 +1594,18 @@ if __name__ == '__main__':
     
     from waitress import serve
     port = int(os.getenv("PORT", 5000))
-    print(f"[DEBUG] → Starting Production Server on http://localhost:{port}", flush=True)
-    serve(app, host='0.0.0.0', port=port, threads=2)
+    print(f"\n🚀 [ANTIGRAVITY VERSION 2.0] Backend is starting...")
+    print(f"📡 [DEBUG] R2_BUCKET: {R2_BUCKET_NAME}")
+    print(f"📡 [DEBUG] R2_ENDPOINT: https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com")
+    if not R2_ACCESS_KEY_ID:
+        print("❌ [CRITICAL] R2_ACCESS_KEY_ID IS MISSING! Check your root .env file.")
+    else:
+        print("✅ [INFO] R2 Credentials detected.")
+    
+    print(f"[DEBUG] → Starting Production Server on http://localhost:{port}\n", flush=True)
+    try:
+        serve(app, host='0.0.0.0', port=port, threads=6)
+    except Exception as e:
+        print(f"\n❌ [CRITICAL] Server failed to start: {e}", flush=True)
+    
+    print("\n🛑 [SHUTDOWN] Main thread has exited.", flush=True)
