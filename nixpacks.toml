@@ -1,7 +1,9 @@
+# Nixpacks Configuration (Force Refresh V2)
 [phases.setup]
 nixPkgs = ["nodejs_20", "python311", "python311Packages.pip", "gcc", "pkg-config", "libGL", "libGLU", "cmake", "zlib"]
 
 [phases.install]
+dependsOn = ["setup"]
 cmds = [
   "npm ci",
   "python3 -m venv /opt/venv",
@@ -10,6 +12,7 @@ cmds = [
 ]
 
 [phases.build]
+dependsOn = ["install"]
 cmds = ["npm run build"]
 
 [start]
