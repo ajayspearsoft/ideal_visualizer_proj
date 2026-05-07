@@ -21,5 +21,5 @@ COPY --from=builder /app/dist ./dist
 # Expose port (Vite typically builds to /dist)
 EXPOSE 3000
 
-# Start command
-CMD ["serve", "-s", "dist", "-l", "3000"]
+# Start command (using tcp://0.0.0.0 to ensure it is reachable externally)
+CMD ["serve", "-s", "dist", "-l", "tcp://0.0.0.0:3000"]
