@@ -5,7 +5,6 @@
     "watchPatterns": ["Dockerfile", "backend/**", "src/**"]
   },
   "deploy": {
-    "startCommand": "serve -s dist -l 3000",
     "rootDirectory": "./",
     "numReplicas": 1,
     "sleepOnIdle": false
