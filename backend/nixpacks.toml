@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = ["python311", "python311Packages.pip", "gcc", "pkg-config", "libGL", "libGLU", "cmake", "zlib"]
+
+[phases.install]
+cmds = [
+  "python3 -m ensurepip || true",
+  "python3 -m pip install --upgrade pip setuptools wheel",
+  "python3 -m pip install --no-cache-dir -r requirements.txt"
+]
+
+[start]
+cmd = "python3 app.py"
