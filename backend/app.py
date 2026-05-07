@@ -233,6 +233,8 @@ sam_predictor = None
 yolo_model = None
 scene_processor = None
 scene_model = None
+depth_model = None
+depth_transform = None
 models_ready = False
 model_loading_error = None
 
@@ -299,10 +301,24 @@ def load_models():
         scene_model.eval()
         print("[DEBUG] SegFormer Loaded Successfully", flush=True)
 
-        # 4. OCR
+        # 4. MiDaS (Depth Estimation)
+        print("[DEBUG] Loading MiDaS (Small)...", flush=True)
+        try:
+            depth_model_type = "MiDaS_small"
+            depth_model = torch.hub.load("intel-isl/MiDaS", depth_model_type, trust_repo=True)
+            depth_model.to(device)
+            depth_model.eval()
+            
+            midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
+            depth_transform = midas_transforms.small_transform if depth_model_type == "MiDaS_small" else midas_transforms.dpt_transform
+            print("[DEBUG] MiDaS Loaded Successfully", flush=True)
+        except Exception as depth_err:
+            print(f"[WARNING] MiDaS loading failed, continuing without depth: {depth_err}", flush=True)
+
+        # 5. OCR
         init_ocr()
 
-        # 5. GLOBAL CPU OPTIMIZATION
+        # 6. GLOBAL CPU OPTIMIZATION
         torch.set_num_threads(min(os.cpu_count(), 4)) # Optimize for multi-tenant CPU environments
         
         models_ready = True
@@ -700,20 +716,57 @@ def crop_image():
                 cv2.imwrite("debug_search.png", search_area)
                 detected_code = extract_code_ocr(search_area, (real_w // 2, search_margin // 2))
 
-        # 3. Last Resort: Find the nearest code from the UI's pre-detected list
+        # 3. Last Resort: Find the best matching code from the UI's pre-detected list
         if not detected_code and detected_codes_from_ui:
-            best_dist = float('inf')
-            # Look for codes near the bottom-center of the crop
+            # Layout-Aware Matching Logic
+            # target_x/y is the center-bottom of the crop
             target_x = real_x + real_w // 2
             target_y = real_y + real_h
             
+            scored_candidates = []
             for d in detected_codes_from_ui:
-                # d should have {code, x, y} in natural image coordinates
-                dist = ((d['x'] - target_x)**2 + (d['y'] - target_y)**2)**0.5
-                if dist < 500 and dist < best_dist: # 500px radius
-                    best_dist = dist
-                    detected_code = d['code']
-                    print(f"[OK] Associated with nearest pre-detected code: {detected_code} (dist: {dist:.1f})")
+                # d: {code, x, y, width, height}
+                cx = d.get('x', d.get('left', 0) + d.get('width', 0)//2)
+                cy = d.get('y', d.get('top', 0) + d.get('height', 0)//2)
+                cw = d.get('width', 40)
+                ch = d.get('height', 20)
+                
+                # 1. Calculate weighted distance (Layout-Aware)
+                dx = abs(cx - target_x)
+                dy = cy - target_y # Distance below the crop
+                
+                # Base score is Euclidean
+                score = (dx**2 + dy**2)**0.5
+                
+                # FACTOR A: Vertical Bias (Catalog Codes are usually BELOW the texture)
+                if dy > 0 and dy < 350:
+                    score *= 0.7  # Strong bonus for being below
+                elif dy < -20:
+                    score *= 3.0  # Strong penalty for being above the texture
+                
+                # FACTOR B: Horizontal Alignment (Column Awareness)
+                # If the code's horizontal center is within the texture's width
+                if dx < (real_w * 0.6):
+                    score *= 0.8  # Bonus for being in the same visual column
+                else:
+                    score *= 2.5  # Heavy penalty for being in a different column
+                
+                # FACTOR C: Overlap/Containment
+                # If code center is actually inside the crop horizontally
+                if real_x <= cx <= (real_x + real_w):
+                    score *= 0.9
+                
+                scored_candidates.append({'code': d['code'], 'score': score, 'dist': (dx**2 + dy**2)**0.5})
+
+            if scored_candidates:
+                # Sort by score (lowest is best)
+                scored_candidates.sort(key=lambda x: x['score'])
+                best = scored_candidates[0]
+                
+                # Only associate if it's reasonably close (800px max in any layout)
+                if best['dist'] < 800:
+                    detected_code = best['code']
+                    print(f"[OK] Associated with Layout-Aware match: {detected_code} (score: {best['score']:.1f}, dist: {best['dist']:.1f})")
 
     # Save to MongoDB
     filter_data = {
@@ -953,38 +1006,51 @@ def detect_codes():
 def normalize_code(text):
     """
     Standardizes material codes and corrects common OCR misreads.
-    Example: WK16O-O6 -> WK160-06
+    Improved to handle catalog-specific artifacts (e.g. WK--100, symbols).
     """
     if not text: return ""
-    # Remove whitespace and standardize dashes
-    text = re.sub(r'\s+', '', text)
-    text = text.replace("–", "-").replace("—", "-")
     
-    # OCR Correction logic (Dynamic, not hardcoded to specific codes)
-    if text.upper().startswith("WK"):
-        prefix = text[:2].upper()
+    # 1. Basic Cleanup
+    text = text.upper().strip()
+    text = re.sub(r'\s+', '', text) # Remove internal spaces
+    
+    # 2. Standardize Dashes (Handle different Unicode dashes)
+    text = text.replace("–", "-").replace("—", "-").replace("·", "-").replace("..", "-")
+    
+    # 3. Suppress OCR Artifacts (Common noise characters)
+    text = re.sub(r'[^A-Z0-9-]', '', text)
+    
+    # 4. Correct Double-Dashes and leading/trailing noise
+    text = re.sub(r'-+', '-', text)
+    text = text.strip('-')
+    
+    # 5. Semantic Correction for "WK" prefixed codes
+    if text.startswith("WK"):
+        prefix = "WK"
         rest = text[2:]
-        # Correct common digit/letter confusions in the numeric part
-        rest = rest.replace('O', '0').replace('o', '0')
-        rest = rest.replace('I', '1').replace('l', '1')
-        rest = rest.replace('S', '5').replace('s', '5')
-        text = prefix + rest
+        # Common OCR confusions in digits
+        rest = rest.replace('O', '0').replace('I', '1').replace('L', '1').replace('S', '5').replace('B', '8')
         
-    return text.strip().upper()
+        # Ensure dash structure (WK16028 -> WK160-28)
+        if '-' not in rest and len(rest) >= 5:
+            # Infer split point for standard 3+2 or 3+3 digit codes
+            text = f"WK{rest[:3]}-{rest[3:]}"
+        else:
+            text = prefix + rest
+            
+    return text
 
 def extract_code_regex(text):
     """
-    Regex patterns that are robust to OCR misreads but strict on format.
-    Ensures full codes like WK160-28 are captured, not just WK160.
+    Improved multi-pattern regex for catalog code discovery.
     """
-    # Strict catalog pattern: WK followed by 3 digits, dash, 2-3 digits
-    # Allowing O for 0, I for 1 etc. as they are corrected in normalize_code
     patterns = [
-        r'WK[0-9OIlS]{3}-[0-9OIlS]{2,3}', # Preferred full match: WK160-28
-        r'[A-Z]{1,3}[0-9OIlS]{3,5}-[0-9OIlS]{1,3}', # General fallback
-        r'WK[0-9OIlS]{3,5}', # Partial but specific prefix
-        r'[0-9OIlS]{5,}' # Numeric only fallback
+        r'WK[0-9OIlS]{2,4}-[0-9OIlS]{2,4}', # Standard: WK160-28
+        r'WK[0-9OIlS]{3,7}',                # No-dash: WK16028
+        r'[A-Z]{1,3}-[0-9OIlS]{3,6}',       # Generic: AR-110
+        r'[0-9OIlS]{3,4}-[0-9OIlS]{2,4}'    # Numeric only: 110-01
     ]
+    
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
@@ -999,7 +1065,7 @@ def extract_code_ocr(image, target_point):
     
     target_x, target_y = target_point
     best_code = ""
-    min_dist = float('inf')
+    min_score = float('inf')
     
     for (bbox, text, prob) in results:
         word_text = text.strip()
@@ -1012,9 +1078,20 @@ def extract_code_ocr(image, target_point):
         (tl, tr, br, bl) = bbox
         cx, cy = (tl[0] + br[0]) / 2, (tl[1] + br[1]) / 2
         
-        dist = ((cx - target_x)**2 + (cy - target_y)**2)**0.5
-        if dist < min_dist:
-            min_dist = dist
+        # Multi-Factor Scoring for Local Search
+        dx = abs(cx - target_x)
+        dy = cy - target_y
+        
+        # Base distance
+        score = (dx**2 + dy**2)**0.5
+        
+        # Bonus for vertical alignment (code centered under texture)
+        if dx < 30: score *= 0.5
+        # Penalty for being above the target point
+        if dy < -10: score *= 2.0
+        
+        if score < min_score:
+            min_score = score
             best_code = code
             
     return best_code
@@ -1070,6 +1147,51 @@ def _build_cors_preflight_response():
 # PRODUCTION-GRADE MODULAR PIPELINE
 # ==========================================
 
+def fast_guided_filter(guide, src, radius, eps):
+    """
+    Production-Grade Guided Filter — v2.
+    Uses Scharr-reinforced guidance (more accurate than Sobel),
+    tighter coefficient smoothing for sharper edges without halos.
+    """
+    # 1. Normalize and reinforce guidance with Scharr gradients (more accurate than Sobel)
+    guide_f = guide.astype(np.float32) / 255.0
+    src_f = src.astype(np.float32)
+
+    # Scharr is more rotationally symmetric than Sobel — better at diagonals
+    dx = cv2.Scharr(guide_f, cv2.CV_32F, 1, 0)
+    dy = cv2.Scharr(guide_f, cv2.CV_32F, 0, 1)
+    grad_mag = cv2.magnitude(dx, dy)
+    # Normalize gradient to [0,1] before blending
+    grad_max = np.percentile(grad_mag, 99) + 1e-6
+    grad_norm = np.clip(grad_mag / grad_max, 0, 1)
+    edge_enhanced_guide = cv2.addWeighted(grad_norm, 0.18, guide_f, 0.82, 0)
+
+    # 2. Box filter window — ensure odd and at least 3
+    r = max(3, int(radius))
+    if r % 2 == 0: r += 1
+    win_size = (r, r)
+
+    # 3. Local statistics
+    mean_I  = cv2.blur(edge_enhanced_guide, win_size)
+    mean_p  = cv2.blur(src_f, win_size)
+    mean_Ip = cv2.blur(edge_enhanced_guide * src_f, win_size)
+    cov_Ip  = mean_Ip - mean_I * mean_p
+
+    mean_II = cv2.blur(edge_enhanced_guide * edge_enhanced_guide, win_size)
+    var_I   = mean_II - mean_I * mean_I
+
+    # 4. Coefficient calculation — tighter EPS for crisper edge locking
+    a = cov_Ip / (var_I + eps + 1e-7)
+    b = mean_p - a * mean_I
+
+    # 5. Coefficient smoothing — use r (not 2r) to preserve fine edge detail
+    smooth_win = (r, r)
+    mean_a = cv2.blur(a, smooth_win)
+    mean_b = cv2.blur(b, smooth_win)
+
+    result = mean_a * edge_enhanced_guide + mean_b
+    return np.clip(result, 0.0, 1.0).astype(np.float32)
+
 def detect_walls(image):
     """Step 1: Adaptive Scene Segmentation using SegFormer (ADE20K)"""
     try:
@@ -1106,14 +1228,19 @@ def detect_walls(image):
         # Upsample labels using nearest neighbor to preserve category IDs
         labels = cv2.resize(labels_small.astype(np.float32), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
 
-        # Adaptive confidence threshold
-        conf_thresh = np.percentile(wall_conf, 40) 
-        wall_mask = (wall_conf > max(0.5, conf_thresh)).astype(np.uint8)
+        # Adaptive confidence threshold with vertical bias
+        # Walls typically have higher confidence in the middle vertical band
+        conf_mean = np.mean(wall_conf)
+        conf_thresh = np.percentile(wall_conf, 35) 
+        base_mask = (wall_conf > max(0.4, conf_thresh)).astype(np.uint8)
         
         # Structural protection: floor(3), ceiling(5), windowpane(8), mirror(18)
-        # We use the upsampled labels mask
-        protection_ids = [3, 4, 5, 8, 11, 14, 18, 28, 31, 32, 33, 34, 35, 36, 42, 43, 47, 51, 158]
+        # Expanded IDs: bed(7), cabinet(10), curtain(11), door(14), furniture(21), shelf(28), rug(31), wardrobe(43), mirror(18), windowpane(8)
+        protection_ids = [3, 4, 5, 7, 8, 10, 11, 14, 18, 21, 28, 31, 32, 33, 34, 35, 36, 38, 42, 43, 47, 51, 63, 158]
         structural_protection = np.isin(labels, protection_ids).astype(np.uint8)
+        
+        # Refine wall mask by removing high-confidence structural elements
+        wall_mask = np.logical_and(base_mask, np.logical_not(structural_protection)).astype(np.uint8)
         
         return wall_mask, structural_protection, labels
     except Exception as e:
@@ -1121,46 +1248,242 @@ def detect_walls(image):
         return np.ones(image.shape[:2], dtype=np.uint8), np.zeros(image.shape[:2], dtype=np.uint8), None
 
 def detect_objects(image):
-    """Step 2: Dynamic Object Protection Layer using YOLOv8 (Optimized for 640px)"""
+    """Step 2: Dynamic Object Protection using YOLOv8 with Semantic Protection Hierarchy.
+    Returns a unified binary mask (all tiers combined) for backward-compatible Shield Layer.
+    Internally builds 3-tier protection for use by finalize_mask via module-level storage.
+    """
+    global _last_tiered_protection
     try:
         h_orig, w_orig = image.shape[:2]
         object_mask = np.zeros((h_orig, w_orig), dtype=np.uint8)
-        
-        # DOWN-SCALE FOR REALTIME INFERENCE
+
+        # Tiered protection masks (CRITICAL / MEDIUM / SOFT)
+        critical_mask = np.zeros((h_orig, w_orig), dtype=np.uint8)  # windows, mirrors, doors, trims
+        medium_mask   = np.zeros((h_orig, w_orig), dtype=np.uint8)  # sofas, beds, cabinets
+        soft_mask     = np.zeros((h_orig, w_orig), dtype=np.uint8)  # plants, decor, cushions
+
+        # YOLO class -> tier mapping (COCO classes)
+        # CRITICAL: 0=person, 62=tv/monitor, 56=chair->skip, use for glass-like objects
+        # Pragmatic split based on common interior COCO classes:
+        CRITICAL_CLASSES = {62, 63, 67, 72, 73, 74, 75, 76}  # tv, laptop, clock, book, vase, scissors, toaster, sink
+        MEDIUM_CLASSES   = {56, 57, 58, 59, 60, 61}           # chair, sofa, potted plant, bed, dining table, toilet
+        # Everything else detected → SOFT tier
+
         max_yolo_dim = 640
         scale = max_yolo_dim / max(h_orig, w_orig)
         img_small = cv2.resize(image, (int(w_orig * scale), int(h_orig * scale)))
-        
-        # Run YOLO with dynamic confidence filtering
-        results = yolo_model.predict(img_small, conf=0.25, verbose=False)
+
+        results = yolo_model.predict(img_small, conf=0.15, verbose=False)
         for res in results:
-            if res.masks is not None:
-                for m_data in res.masks.data:
-                    m_cpu = m_data.cpu().numpy()
-                    m_resized = cv2.resize(m_cpu, (w_orig, h_orig), interpolation=cv2.INTER_NEAREST)
-                    object_mask[m_resized > 0] = 1
+            if res.masks is None: continue
+            for idx, m_data in enumerate(res.masks.data):
+                m_cpu = m_data.cpu().numpy()
+                m_resized = cv2.resize(m_cpu, (w_orig, h_orig), interpolation=cv2.INTER_LINEAR)
+                binary = (m_resized > 0.5).astype(np.uint8)
+
+                # Determine tier from class id
+                cls_id = int(res.boxes.cls[idx].item()) if res.boxes is not None and idx < len(res.boxes.cls) else -1
+                area = np.sum(binary)
+
+                if cls_id in CRITICAL_CLASSES:
+                    k_val = max(7, min(13, int(np.sqrt(area) / 40)))  # Robust shielding for hard objects
+                    tier = 'critical'
+                elif cls_id in MEDIUM_CLASSES:
+                    k_val = max(5, min(9, int(np.sqrt(area) / 55)))
+                    tier = 'medium'
+                else:
+                    k_val = max(3, min(7, int(np.sqrt(area) / 70)))   # Thin margin for soft decor
+                    tier = 'soft'
+
+                if k_val % 2 == 0: k_val += 1
+                kernel = np.ones((k_val, k_val), np.uint8)
+                dilated = cv2.dilate(binary, kernel, iterations=1)
+
+                object_mask[dilated > 0] = 1
+                if tier == 'critical':   critical_mask[dilated > 0] = 1
+                elif tier == 'medium':   medium_mask[dilated > 0]   = 1
+                else:                    soft_mask[dilated > 0]     = 1
+
+        # Store tiered masks for use in finalize_mask
+        _last_tiered_protection = {
+            'critical': critical_mask,
+            'medium':   medium_mask,
+            'soft':     soft_mask
+        }
         return object_mask
     except Exception:
+        _last_tiered_protection = None
         return np.zeros(image.shape[:2], dtype=np.uint8)
 
-def detect_edges(image):
-    """Step 3: Adaptive Edge Detection using median-based statistics"""
+# Module-level storage for tiered protection (avoids API changes)
+_last_tiered_protection = None
+
+
+def build_master_edge_field(image, depth_map=None):
+    """
+    ENHANCED Multi-Edge Authority System v2:
+    7-source weighted edge fusion with structural preprocessing.
+
+    Sources:
+      1. Scharr gradient            (0.18) - rotationally accurate boundary sharpness
+      2. Multi-scale Canny fusion   (0.26) - thin lines at 2 scales (fine + coarse)
+      3. Hough length-weighted      (0.22) - long architectural lines only
+      4. LSD length-weighted        (0.18) - sub-pixel segment detection
+      5. LAB chrominance edges      (0.10) - color-only boundaries (invisible in gray)
+      6. Depth discontinuities      (0.06) - foreground/wall plane breaks
+    """
+    h, w = image.shape[:2]
+    diag = np.sqrt(h**2 + w**2)
+
+    # === PREPROCESSING: Bilateral filter — suppress texture noise, preserve structure ===
+    # d=5 is lightweight; keeps CPU impact minimal
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    v = np.median(gray)
-    
-    # Adaptive sigma for Canny based on global image statistics
-    sigma = 0.33
-    lower = int(max(0, (1.0 - sigma) * v))
-    upper = int(min(255, (1.0 + sigma) * v))
-    edges = cv2.Canny(gray, lower, upper)
-    
-    # Resolution-aware dilation kernel
-    diag = np.sqrt(image.shape[0]**2 + image.shape[1]**2)
-    k_size = max(3, int(diag / 400))
+    gray_smooth = cv2.bilateralFilter(gray, 5, 35, 35)
+
+    # === 1. SCHARR GRADIENT — more rotationally symmetric than Sobel ===
+    sx = cv2.Scharr(gray_smooth, cv2.CV_32F, 1, 0)
+    sy = cv2.Scharr(gray_smooth, cv2.CV_32F, 0, 1)
+    scharr_mag = cv2.magnitude(sx, sy)
+    scharr_norm = np.clip(scharr_mag / (np.percentile(scharr_mag, 99) + 1e-6), 0, 1).astype(np.float32)
+
+    # === 2. MULTI-SCALE CANNY FUSION ===
+    v = np.median(gray_smooth)
+    lower = int(max(0, 0.5 * v))
+    upper = int(min(255, 1.5 * v))
+
+    # Scale 1: Full resolution — fine architectural trims and thin edges
+    canny_full = cv2.Canny(gray_smooth, lower, upper).astype(np.float32) / 255.0
+
+    # Scale 2: Half resolution — large structural wall/ceiling/floor boundaries
+    gray_half = cv2.resize(gray_smooth, (max(1, w // 2), max(1, h // 2)))
+    canny_half = cv2.resize(
+        cv2.Canny(gray_half, lower, upper), (w, h)
+    ).astype(np.float32) / 255.0
+
+    # Fuse: full gets more weight (fine detail), half reinforces large boundaries
+    canny_fused = np.clip(canny_full * 0.65 + canny_half * 0.35, 0, 1).astype(np.float32)
+
+    # === 3. HOUGH — length-weighted long structural lines ===
+    canny_u8 = (canny_full * 255).astype(np.uint8)
+    lines = cv2.HoughLinesP(canny_u8, 1, np.pi / 180, threshold=60,
+                            minLineLength=int(diag * 0.06), maxLineGap=8)
+    hough_mask = np.zeros((h, w), dtype=np.float32)
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            seg_len = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+            # Longer lines → higher authority (normalized to diagonal)
+            weight = float(np.clip(seg_len / (diag * 0.12), 0.3, 1.0))
+            cv2.line(hough_mask, (x1, y1), (x2, y2), weight, 2)
+    hough_mask = np.clip(hough_mask, 0, 1)
+
+    # === 4. LSD — length-weighted sub-pixel segment detection ===
+    lsd_mask = np.zeros((h, w), dtype=np.float32)
+    try:
+        lsd = cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD)
+        lines_lsd, _, _, _ = lsd.detect(gray_smooth.astype(np.float64))
+        if lines_lsd is not None:
+            for seg in lines_lsd:
+                x1, y1, x2, y2 = map(int, seg[0])
+                seg_len = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                if seg_len > diag * 0.015:  # Drop tiny noise segments
+                    weight = float(np.clip(seg_len / (diag * 0.08), 0.2, 1.0))
+                    cv2.line(lsd_mask, (x1, y1), (x2, y2), weight, 1)
+    except Exception:
+        pass  # LSD not available — graceful fallback
+
+    # === 5. LAB CHROMINANCE EDGES — color-only boundaries ===
+    # Critical for colored furniture/decor on white/neutral walls
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB).astype(np.float32)
+    color_edge = np.zeros((h, w), dtype=np.float32)
+    for c_idx in [1, 2]:  # A and B channels (skip L — already in scharr)
+        ch = cv2.normalize(lab[:, :, c_idx], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        ch_sm = cv2.GaussianBlur(ch, (3, 3), 0)
+        cx = cv2.Scharr(ch_sm, cv2.CV_32F, 1, 0)
+        cy = cv2.Scharr(ch_sm, cv2.CV_32F, 0, 1)
+        ch_mag = cv2.magnitude(cx, cy)
+        ch_norm = np.clip(ch_mag / (np.percentile(ch_mag, 97) + 1e-6), 0, 1).astype(np.float32)
+        color_edge = np.maximum(color_edge, ch_norm)
+    color_edge = np.clip(color_edge, 0, 1).astype(np.float32)
+
+    # === 6. DEPTH DISCONTINUITIES — wall/foreground plane breaks ===
+    depth_edge = np.zeros((h, w), dtype=np.float32)
+    if depth_map is not None:
+        try:
+            dm = cv2.resize(depth_map.astype(np.float32), (w, h))
+            # Bilateral-filter depth for cleaner discontinuity detection
+            dm_smooth = cv2.bilateralFilter(dm, 7, 0.1, 5)
+            ddx = cv2.Scharr(dm_smooth, cv2.CV_32F, 1, 0)
+            ddy = cv2.Scharr(dm_smooth, cv2.CV_32F, 0, 1)
+            depth_mag = cv2.magnitude(ddx, ddy)
+            depth_edge = np.clip(depth_mag / (np.percentile(depth_mag, 98) + 1e-6), 0, 1).astype(np.float32)
+        except Exception:
+            pass
+
+    # === WEIGHTED FUSION ===
+    master = (scharr_norm  * 0.18
+            + canny_fused  * 0.26
+            + hough_mask   * 0.22
+            + lsd_mask     * 0.18
+            + color_edge   * 0.10
+            + depth_edge   * 0.06)
+    master = np.clip(master, 0, 1).astype(np.float32)
+
+    # Minimal dilation — creates a 1-2px repulsion field without destroying edge precision
+    k_size = max(3, int(diag / 900))
     if k_size % 2 == 0: k_size += 1
-    
-    kernel = np.ones((k_size, k_size), np.uint8)
-    return cv2.dilate(edges, kernel, iterations=1)
+    master_dilated = cv2.dilate(
+        (master * 255).astype(np.uint8),
+        np.ones((k_size, k_size), np.uint8), iterations=1
+    )
+    return master_dilated.astype(np.float32) / 255.0
+
+
+def compute_depth_foreground_suppression(depth_map, object_mask, wall_mask_alpha):
+    """
+    DEPTH-AWARE FOREGROUND SEPARATION:
+    Suppresses wall alpha where objects are demonstrably closer (foreground) than the wall.
+    Prevents wallpaper from crossing sofa/plant/TV boundaries using depth discontinuities.
+    """
+    if depth_map is None: return wall_mask_alpha
+    try:
+        h, w = wall_mask_alpha.shape
+        dm = cv2.resize(depth_map.astype(np.float32), (w, h))
+        # MiDaS: smaller value = closer. We invert so foreground = high value.
+        dm_inv = 1.0 - dm
+
+        # Estimate wall depth reference: median depth in pure-wall regions
+        pure_wall = (wall_mask_alpha > 0.7).astype(bool)
+        if np.any(pure_wall):
+            wall_depth_ref = np.median(dm_inv[pure_wall])
+        else:
+            wall_depth_ref = np.median(dm_inv)
+
+        # Objects significantly closer (higher inv-depth) than wall → force alpha=0
+        # Threshold: object must be at least 15% closer than wall reference
+        foreground_zone = (dm_inv > wall_depth_ref + 0.15).astype(np.float32)
+
+        # Intersect with YOLO object mask to avoid suppressing dark wall regions
+        if object_mask is not None:
+            obj = cv2.resize(object_mask.astype(np.float32), (w, h))
+            foreground_zone = foreground_zone * obj
+
+        # Smooth transition boundary (avoid hard cuts at suppression edge)
+        foreground_zone = cv2.GaussianBlur(foreground_zone, (7, 7), 0)
+        suppressed = wall_mask_alpha * np.clip(1.0 - foreground_zone * 1.5, 0, 1)
+        return suppressed.astype(np.float32)
+    except Exception:
+        return wall_mask_alpha
+
+
+def detect_edges(image, depth_map=None):
+    """Step 3: Multi-Edge Authority Field — Architectural Locking.
+    Returns uint8 [0,255] master edge map for backward compatibility.
+    Internally uses build_master_edge_field for fused edge authority.
+    """
+    master = build_master_edge_field(image, depth_map=depth_map)
+    return (master * 255).astype(np.uint8)
+
 
 def detect_texture(image):
     """Step 4: Dynamic Texture/Graphic Removal (Stickers, Posters, Frames)"""
@@ -1183,17 +1506,112 @@ def detect_texture(image):
     t_thresh = np.percentile(texture_density, 88)
     return (texture_density > t_thresh).astype(np.uint8)
 
+def estimate_depth(image):
+    """Generate a relative depth map for geometric guidance."""
+    global depth_model, depth_transform
+    if depth_model is None: return None
+    
+    try:
+        import torch
+        device = next(depth_model.parameters()).device
+        
+        # Preprocess at a reduced resolution for speed (SaaS efficiency)
+        h, w = image.shape[:2]
+        img_input = cv2.resize(image, (384, 384)) # MiDaS small optimal size
+        
+        input_batch = depth_transform(img_input).to(device)
+        
+        # Inference
+        with torch.no_grad():
+            prediction = depth_model(input_batch)
+            prediction = torch.nn.functional.interpolate(
+                prediction.unsqueeze(1),
+                size=(h, w),
+                mode="bicubic",
+                align_corners=False,
+            ).squeeze()
+        
+        output = prediction.cpu().numpy()
+        # Normalize to 0-1 (Near is 0, Far is 1)
+        output = (output - output.min()) / (output.max() - output.min() + 1e-6)
+        return output
+    except Exception as e:
+        print(f"[ERROR] Depth Estimation failed: {e}")
+        return None
+
+def detect_planes(image, mask, depth_map):
+    """
+    Decompose the wall mask into dominant architectural planes (Left, Front, Right).
+    Returns a list of (mask, orientation) tuples for perspective warping.
+    """
+    if depth_map is None: return [(mask, "front")]
+    
+    h, w = mask.shape
+    planes = []
+    
+    # 1. Analyze depth gradients and horizontal profile to find plane transitions
+    # Using a 1D mean depth profile helps find vertical corner lines
+    depth_profile = np.mean(depth_map, axis=0)
+    depth_diff = np.abs(np.gradient(depth_profile))
+    
+    # Identify vertical "seams" where depth changes sharply or gradients shift
+    # We look for local maxima in the depth derivative
+    potential_corners = np.where(depth_diff > np.percentile(depth_diff, 97))[0]
+    
+    # 2. Segment mask into planes based on detected seams
+    last_x = 0
+    min_plane_width = w * 0.15 # Minimum 15% width to be considered a separate plane
+    
+    for corner_x in potential_corners:
+        if corner_x - last_x < min_plane_width: continue
+        
+        plane_mask = np.zeros_like(mask)
+        plane_mask[:, last_x:corner_x] = mask[:, last_x:corner_x]
+        
+        if np.sum(plane_mask) > (h * w * 0.01): # Min 1% of total area
+            # Determine orientation based on depth gradient in this segment
+            seg_depth = depth_profile[last_x:corner_x]
+            if seg_depth[-1] > seg_depth[0] + 0.05:
+                orientation = "left"
+            elif seg_depth[0] > seg_depth[-1] + 0.05:
+                orientation = "right"
+            else:
+                orientation = "front"
+            planes.append((plane_mask, orientation))
+            last_x = corner_x
+            
+    # Add the final segment
+    plane_mask = np.zeros_like(mask)
+    plane_mask[:, last_x:] = mask[:, last_x:]
+    if np.sum(plane_mask) > (h * w * 0.01):
+        seg_depth = depth_profile[last_x:]
+        if seg_depth[-1] > seg_depth[0] + 0.05:
+            orientation = "left"
+        elif seg_depth[0] > seg_depth[-1] + 0.05:
+            orientation = "right"
+        else:
+            orientation = "front"
+        planes.append((plane_mask, orientation))
+        
+    return planes if planes else [(mask, "front")]
+
 def detect_glass(image):
-    """Step 5: Dynamic Glass/Window Detection (HSV Percentiles)"""
+    """Step 5: Dynamic Glass/Window Detection (HSV + Texture Smoothness)"""
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     s_channel = hsv[:,:,1]
     v_channel = hsv[:,:,2]
     
-    # Glass rule: High brightness + Low saturation relative to the room stats
-    v_thresh = np.percentile(v_channel, 93) 
-    s_thresh = np.percentile(s_channel, 12) 
+    # Texture smoothness check (Glass/Windows are usually very smooth)
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Sobel(gray, cv2.CV_64F, 1, 1, ksize=3)
+    edges_abs = np.abs(edges)
+    smooth_mask = cv2.GaussianBlur(edges_abs, (15, 15), 0) < 20
     
-    return ((v_channel > v_thresh) & (s_channel < s_thresh)).astype(np.uint8)
+    # Glass rule: High brightness + Low saturation + Smoothness
+    v_thresh = np.percentile(v_channel, 90) 
+    s_thresh = np.percentile(s_channel, 15) 
+    
+    return ((v_channel > v_thresh) & (s_channel < s_thresh) & smooth_mask).astype(np.uint8)
 
 def refine_mask(image, wall_mask, protection_mask, preview_mode=True):
     """Step 6: Fine Segmentation & Boundary Refinement using SAM (Bypassed in Preview)"""
@@ -1229,35 +1647,99 @@ def refine_mask(image, wall_mask, protection_mask, preview_mode=True):
     except Exception:
         return wall_mask
 
-def finalize_mask(mask, image_shape):
-    """Step 8 & 9: Dynamic Morphology & Edge Smoothing"""
+def finalize_mask(mask, image, edges=None, protection_layer=None, depth_map=None):
+    """
+    Step 8 & 9: Production-Grade Mask Refinement.
+    Enhanced with:
+    - Multi-Edge Authority guided filtering
+    - Depth-aware foreground suppression
+    - Tiered object protection blending
+    - Adaptive Gaussian-weighted edge attraction (no binary snapping)
+    - Final Zero-Bleed anti-overflow pass
+    """
     mask = mask.astype(np.uint8)
-    h, w = image_shape[:2]
+    h, w = image.shape[:2]
     diag = np.sqrt(h**2 + w**2)
-    
-    # Adaptive kernel for closing small gaps
-    k_size = max(3, int(diag / 300))
+
+    # 1. Morphological Cleanup (Structural Integrity)
+    k_size = max(3, int(diag / 400))
     if k_size % 2 == 0: k_size += 1
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
-    
-    # Step 8: Morphological Cleanup
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-    
-    # Connected component filtering to remove small noise
+
+    # 2. Connected Component Selection (Noise Suppression)
     num_labels, labels_cc, stats, _ = cv2.connectedComponentsWithStats(mask)
     if num_labels > 1:
         max_area = np.max(stats[1:, cv2.CC_STAT_AREA])
-        mask = np.isin(labels_cc, [i for i in range(1, num_labels) if stats[i, cv2.CC_STAT_AREA] > max_area * 0.04]).astype(np.uint8)
-    
-    # Step 9: Sharp but smooth blending (Small Resolution-aware Gaussian)
-    blur_size = max(3, int(diag / 600))
-    if blur_size % 2 == 0: blur_size += 1
-    alpha = cv2.GaussianBlur(mask.astype(np.float32), (blur_size, blur_size), 0)
-    
-    # 🔥 Boost mask strength to prevent "patchy" walls
-    alpha = np.clip(alpha * 1.2, 0, 1)
-    
-    return alpha
+        mask = np.isin(labels_cc, [i for i in range(1, num_labels)
+                                    if stats[i, cv2.CC_STAT_AREA] > max_area * 0.02]).astype(np.uint8)
+
+    # 3. EDGE-LOCKED GUIDED FILTER REFINEMENT
+    gray_guide = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    refined_alpha = fast_guided_filter(gray_guide, mask, radius=max(3, int(diag / 500)), eps=0.0001)
+    refined_alpha = np.clip(refined_alpha, 0.0, 1.0).astype(np.float32)
+
+    # 4. ADAPTIVE GAUSSIAN-WEIGHTED EDGE ATTRACTION
+    # Structural edges softly attract alpha toward binary state (no hard jumps → no aliasing)
+    if edges is not None:
+        edge_f = edges.astype(np.float32) / 255.0
+        # Build per-pixel Gaussian influence field
+        edge_influence = cv2.GaussianBlur(edge_f, (9, 9), 0)
+        edge_influence = np.clip(edge_influence * 2.0, 0, 1)  # 2× boost for authority
+
+        # Weighted blend: near strong edges → pulled toward hard binary; far = smooth
+        hard_alpha = (refined_alpha > 0.5).astype(np.float32)
+        refined_alpha = refined_alpha * (1.0 - edge_influence) + hard_alpha * edge_influence
+
+    # 5. Non-linear contrast curve ("Crisp but Soft" transitions)
+    safe_alpha = np.clip(refined_alpha, 1e-6, 1.0 - 1e-6)
+    refined_alpha = np.where(safe_alpha > 0.5,
+                             np.power(safe_alpha, 0.6),
+                             np.power(safe_alpha, 1.4))
+    refined_alpha = np.clip(refined_alpha * 1.05, 0, 1).astype(np.float32)
+
+    # 6. DEPTH-AWARE FOREGROUND SUPPRESSION
+    # Objects demonstrably closer than wall plane → alpha forced to 0
+    obj_mask_for_depth = protection_layer  # Reuse shield as object region hint
+    refined_alpha = compute_depth_foreground_suppression(depth_map, obj_mask_for_depth, refined_alpha)
+
+    # 7. TIERED PROTECTION BLENDING
+    # Apply tier-specific suppression strengths using stored YOLO tier masks
+    global _last_tiered_protection
+    if _last_tiered_protection is not None:
+        tp = _last_tiered_protection
+        for tier_name, suppression_strength in [('critical', 1.0), ('medium', 0.95), ('soft', 0.80)]:
+            tier_m = tp.get(tier_name)
+            if tier_m is None: continue
+            if tier_m.shape[:2] != (h, w):
+                tier_m = cv2.resize(tier_m, (w, h), interpolation=cv2.INTER_NEAREST)
+            # Dilate by tier-specific amount
+            dil_k = {'critical': 5, 'medium': 3, 'soft': 2}[tier_name]
+            tier_dilated = cv2.dilate(tier_m, np.ones((dil_k, dil_k), np.uint8), iterations=1).astype(np.float32)
+            # Smoothed boundary transition
+            tier_smooth = cv2.GaussianBlur(tier_dilated, (5, 5), 0)
+            refined_alpha = refined_alpha * np.clip(1.0 - tier_smooth * suppression_strength, 0, 1)
+
+    # 8. FINAL ANTI-BLEED PASS (Zero Overflow)
+    # Hard suppression where master edge authority is very high AND protection zone is active
+    if edges is not None and protection_layer is not None:
+        # Strong edge pixels very close to protected objects = guaranteed bleed zone
+        strong_edge = (edges.astype(np.float32) / 255.0 > 0.5)
+        prot_resized = cv2.resize(protection_layer.astype(np.float32), (w, h), interpolation=cv2.INTER_NEAREST)
+        bleed_zone = (strong_edge & (prot_resized > 0)).astype(np.float32)
+        # Dilate bleed zone by 2px to catch sub-pixel overflow
+        bleed_zone = cv2.dilate(bleed_zone, np.ones((3, 3), np.uint8), iterations=1).astype(np.float32)
+        bleed_zone = cv2.GaussianBlur(bleed_zone, (5, 5), 0)
+        refined_alpha = refined_alpha * np.clip(1.0 - bleed_zone * 1.5, 0, 1)
+
+    # 9. FINAL HARD PROTECTION OVERRIDE (Production Shield)
+    if protection_layer is not None:
+        if protection_layer.shape[:2] != (h, w):
+            protection_layer = cv2.resize(protection_layer, (w, h), interpolation=cv2.INTER_NEAREST)
+        shield = cv2.dilate(protection_layer, np.ones((3, 3), np.uint8), iterations=1).astype(np.float32)
+        refined_alpha = refined_alpha * (1.0 - shield)
+
+    return np.clip(refined_alpha, 0, 1).astype(np.float32)
 
 def tile_texture(texture, target_h, target_w, scale=1.0):
     """
@@ -1295,6 +1777,34 @@ def tile_texture(texture, target_h, target_w, scale=1.0):
     except Exception as e:
         print(f"Error in dynamic tiling: {e}")
         return cv2.resize(texture, (target_w, target_h))
+
+def perspective_tile(texture, target_h, target_w, scale, orientation="front"):
+    """
+    Warp a tiled texture based on architectural plane orientation.
+    Supports 'front', 'left', and 'right' projections.
+    """
+    # 1. Generate standard high-res tiling
+    tiled = tile_texture(texture, target_h, target_w, scale=scale)
+    
+    if orientation == "front":
+        return tiled
+        
+    # 2. Perspective Warp for depth-aware projection
+    # Standard corners
+    pts1 = np.float32([[0, 0], [target_w, 0], [0, target_h], [target_w, target_h]])
+    
+    # Warp target corners based on vanishing point direction
+    if orientation == "left":
+        # Vanishing toward the left (near is right, far is left)
+        # We compress the left side and apply vertical tilt
+        pts2 = np.float32([[target_w*0.25, target_h*0.08], [target_w, 0], [target_w*0.25, target_h*0.92], [target_w, target_h]])
+    else: # right
+        # Vanishing toward the right (near is left, far is right)
+        pts2 = np.float32([[0, 0], [target_w*0.75, target_h*0.08], [0, target_h], [target_w*0.75, target_h*0.92]])
+        
+    matrix = cv2.getPerspectiveTransform(pts1, pts2)
+    warped = cv2.warpPerspective(tiled, matrix, (target_w, target_h), borderMode=cv2.BORDER_REPLICATE)
+    return warped
 
 def remove_wall_glare(image, mask):
     """
@@ -1377,60 +1887,55 @@ def apply_artistic_filter(image, preview_mode=False):
     except Exception:
         return image
 
-def apply_texture(image, mask, texture, scale=1.0, preview_mode=True):
+def apply_texture(image, mask, texture, scale=1.0, preview_mode=True, depth_map=None):
     """
-    REALTIME PREVIEW RENDERING PIPELINE
-    Optimized for sub-5s material switching.
+    GEOMETRY-AWARE RENDERING ENGINE
+    Implements plane-aware projection and intrinsic lighting preservation.
     """
     try:
         h, w = image.shape[:2]
         
-        # --- 1. LIGHTING ESTIMATION (Simplified for Preview) ---
-        # Instead of expensive inpainting, we use a simple luminosity map
-        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
-        l_recon = lab[:,:,0].astype(np.float32)
+        # --- 1. INTRINSIC LIGHTING PRESERVATION ---
+        # Extract low-frequency illumination field to preserve shadows and gradients
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        illumination = cv2.GaussianBlur(gray, (81, 81), 0)
         
-        if preview_mode:
-            # Fast blurring instead of bilateralFilter
-            l_recon_smooth = cv2.GaussianBlur(l_recon.astype(np.uint8), (15, 15), 0).astype(np.float32)
-            reconstructed_rgb = image.astype(np.float32) # Skip inpainting in preview
-        else:
-            # High-quality path (for future export)
-            idz_mask = ((l_recon > 220) * (mask > 0.5)).astype(np.uint8)
-            kernel = np.ones((15, 15), np.uint8)
-            idz_mask_expanded = cv2.dilate(idz_mask, kernel, iterations=1)
-            reconstructed_rgb = cv2.inpaint(image, idz_mask_expanded, 10, cv2.INPAINT_TELEA).astype(np.float32)
-            l_recon_smooth = cv2.bilateralFilter(l_recon.astype(np.uint8), 11, 75, 75).astype(np.float32)
-
-        mean_l_clean = np.mean(l_recon_smooth[mask > 0.5]) if np.any(mask > 0.5) else 128.0
-        lighting_map = l_recon_smooth / (mean_l_clean + 1e-6)
-        np.clip(lighting_map, 0.5, 1.3, out=lighting_map)
+        # Normalize relative to the wall's average intensity
+        wall_avg = np.mean(illumination[mask > 0.5]) if np.any(mask > 0.5) else 128.0
+        light_field = illumination / (wall_avg + 1e-6)
         
-        # --- 2. TEXTURE APPLICATION ---
-        tiled_tex = tile_texture(texture, h, w, scale=scale).astype(np.float32)
-        blended = tiled_tex * np.expand_dims(lighting_map, axis=2)
+        # --- 2. PLANE-AWARE PERSPECTIVE PROJECTION ---
+        # Decompose the room into geometric planes
+        planes = detect_planes(image, mask, depth_map)
         
-        if not preview_mode:
-            # Add detail restoration only in high-quality mode
-            l_detail = l_recon - cv2.GaussianBlur(l_recon, (9, 9), 0)
-            blended += np.expand_dims(l_detail * 0.1, axis=2)
+        # Generate the geometry-corrected texture map
+        full_texture_map = np.zeros_like(image, dtype=np.float32)
+        for plane_mask, orientation in planes:
+            # Warp texture specifically for this plane's perspective
+            warped_plane = perspective_tile(texture, h, w, scale, orientation).astype(np.float32)
+            # Add to full map using the plane's specific mask
+            full_texture_map += warped_plane * np.expand_dims(plane_mask, axis=2)
+            
+        # --- 3. DUAL-SCALE LIGHTING MULTIPLEXER ---
+        # Apply intrinsic shadows + ambient room lighting
+        # We use a non-linear multiplication to keep shadows deep but preserve highlights
+        blended = full_texture_map * np.expand_dims(np.clip(light_field, 0.3, 1.3), axis=2)
         
-        np.clip(blended, 0, 255, out=blended)
+        # Add high-frequency detail (architectural shadows/creases)
+        detail_shadows = gray - illumination
+        blended += np.expand_dims(np.clip(detail_shadows * 0.4, -30, 30), axis=2)
         
-        # --- 3. BLENDING ---
-        feather = 5 if preview_mode else 11
-        alpha_mask = cv2.GaussianBlur(mask, (feather, feather), 0)
-        alpha_mask_3d = np.expand_dims(alpha_mask, axis=2)
+        # --- 4. DEPTH-AWARE COMPOSITING ---
+        alpha_mask_3d = np.expand_dims(mask, axis=2)
+        reconstructed_rgb = image.astype(np.float32)
         
         result = (blended * alpha_mask_3d) + (reconstructed_rgb * (1.0 - alpha_mask_3d))
+        np.clip(result, 0, 255, out=result)
         
-        # Cleanup
-        del l_recon, l_recon_smooth, lighting_map, tiled_tex, alpha_mask_3d
-        
-        return apply_artistic_filter(np.clip(result, 0, 255).astype(np.uint8), preview_mode=preview_mode)
+        return apply_artistic_filter(result.astype(np.uint8), preview_mode=preview_mode)
         
     except Exception as e:
-        print(f"Rendering Error: {e}")
+        print(f"Rendering Engine Error: {e}")
         return image
 
 
@@ -1522,12 +2027,17 @@ def upload_room():
         new_w, new_h = int(w_orig * scale), int(h_orig * scale)
         image_preview = cv2.resize(image_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
         
-        # 2. AI SEGMENTATION
+        # 2. AI SEGMENTATION & GEOMETRIC UNDERSTANDING
         wall_mask, structural_protection, labels = detect_walls(image_rgb)
         object_mask = detect_objects(image_rgb)
-        protection_layer = np.logical_or(structural_protection > 0, object_mask > 0).astype(np.uint8)
+        depth_map = estimate_depth(image_rgb)
+        edges = detect_edges(image_rgb, depth_map=depth_map)  # Feed depth for edge fusion
+        
+        # Unified Protection Layer (The Shield)
+        protection_layer = cv2.bitwise_or(structural_protection, object_mask)
         refined = refine_mask(image_rgb, wall_mask, protection_layer, preview_mode=True)
-        mask_soft = finalize_mask(refined, image_rgb.shape)
+        mask_soft = finalize_mask(refined, image_rgb, edges=edges,
+                                  protection_layer=protection_layer, depth_map=depth_map)
         mask_preview = cv2.resize(mask_soft, (new_w, new_h))
         
         # 3. LIGHTING PREP
@@ -1547,6 +2057,7 @@ def upload_room():
             'image_preview': image_preview,
             'mask_preview': mask_preview,
             'lighting_map': lighting_map,
+            'depth_map': depth_map, # Store depth for geometry-aware switching
             'timestamp': time.time()
         }
         
@@ -1589,9 +2100,10 @@ def process_wall():
             cached_data = room_session_cache[session_id]
             image_preview = cached_data['image_preview']
             mask_preview = cached_data['mask_preview']
-            lighting_map = cached_data['lighting_map']
+            lighting_map = cached_data.get('lighting_map')
             seg_time = 0.0
-            tex_start = time.time() # To keep tex_time consistent
+            tex_time = 0.0
+            tex_start = time.time()
         else:
             # FALLBACK: UPLOAD EVERY TIME
             if 'wall_image' not in request.files: 
@@ -1622,12 +2134,21 @@ def process_wall():
                 scale = max_dim / max(h_orig, w_orig)
                 image_preview = cv2.resize(image_full, (int(w_orig * scale), int(h_orig * scale)))
                 
+                # 2. AI SEGMENTATION & GEOMETRIC UNDERSTANDING
                 wall_mask, structural_protection, _ = detect_walls(image_full)
                 object_mask = detect_objects(image_full)
-                protection_layer = np.logical_or(structural_protection > 0, object_mask > 0).astype(np.uint8)
-                refined = refine_mask(image_full, wall_mask, protection_layer, preview_mode=True)
-                mask_preview = cv2.resize(finalize_mask(refined, image_full.shape), (image_preview.shape[1], image_preview.shape[0]))
+                depth_map = estimate_depth(image_full)
+                edges = detect_edges(image_full, depth_map=depth_map)  # Depth-fused edges
                 
+                # Unified Protection Layer (The Shield)
+                protection_layer = cv2.bitwise_or(structural_protection, object_mask)
+                refined = refine_mask(image_full, wall_mask, protection_layer, preview_mode=True)
+                mask_preview = cv2.resize(
+                    finalize_mask(refined, image_full, edges=edges,
+                                  protection_layer=protection_layer, depth_map=depth_map),
+                    (image_preview.shape[1], image_preview.shape[0]))
+                
+                # Improved Lighting Field (SaaS Optimization)
                 lab = cv2.cvtColor(image_preview, cv2.COLOR_RGB2LAB).astype(np.float32)
                 l_smooth = cv2.GaussianBlur(lab[:,:,0].astype(np.uint8), (13, 13), 0).astype(np.float32)
                 mean_l = np.mean(l_smooth[mask_preview > 0.5]) if np.any(mask_preview > 0.5) else 128.0
@@ -1639,9 +2160,12 @@ def process_wall():
                     'image_preview': image_preview,
                     'mask_preview': mask_preview,
                     'lighting_map': lighting_map,
+                    'depth_map': depth_map, # Support for geometry-aware rendering
                     'timestamp': time.time()
                 }
                 seg_time = time.time() - seg_start
+                # Point cached_data to the newly created session entry
+                cached_data = room_session_cache[image_hash]
 
         # --- SMART TEXTURE RETRIEVAL (WITH RAM CACHE) ---
         texture = None
@@ -1690,32 +2214,36 @@ def process_wall():
         if texture is None: 
             return jsonify({'error': 'Texture not found.'}), 400
         
-        # Step 10: Apply Texture (Instant Preview Path)
+        # Step 10: Apply Texture (Enhanced Geometry-Aware Path)
         render_start = time.time()
-        # Direct Blend logic (Optimized)
         h, w = image_preview.shape[:2]
-        tiled_tex = tile_texture(texture, h, w, scale=1.0).astype(np.float32)
-        blended = tiled_tex * np.expand_dims(lighting_map, axis=2)
-        np.clip(blended, 0, 255, out=blended)
+        # Retrieve depth map for perspective guidance (safe — cached_data always set above)
+        depth_map = cached_data.get('depth_map') if cached_data else None
+        # Use the upgraded rendering engine for photographic realism
+        result_rgb = apply_texture(
+            image_preview, 
+            mask_preview, 
+            texture, 
+            scale=1.0, 
+            preview_mode=True, 
+            depth_map=cv2.resize(depth_map, (w, h)) if depth_map is not None else None
+        )
         
-        alpha_mask_3d = np.expand_dims(mask_preview, axis=2)
-        result = (blended * alpha_mask_3d) + (image_preview.astype(np.float32) * (1.0 - alpha_mask_3d))
+        # Timing for transparency
         render_time = time.time() - render_start
         
         # 3. BASE64 WebP ENCODING (ELIMINATES R2 LATENCY)
         encode_start = time.time()
-        result_uint8 = np.clip(result, 0, 255).astype(np.uint8)
-        result_bgr = cv2.cvtColor(result_uint8, cv2.COLOR_RGB2BGR)
+        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         is_success, buffer = cv2.imencode(".webp", result_bgr, [cv2.IMWRITE_WEBP_QUALITY, 60])
         
         import base64
         base64_img = base64.b64encode(buffer).decode('utf-8')
         data_uri = f"data:image/webp;base64,{base64_img}"
         encode_time = time.time() - encode_start
-
-        total_time = time.time() - start_total
-        print(f"🚀 INSTANT RENDER: {total_time:.2f}s | Seg: {seg_time:.2f}s | Tex: {tex_time:.2f}s | Render: {render_time:.2f}s | Encode: {encode_time:.2f}s", flush=True)
         
+        total_time = time.time() - start_total
+        print(f"🚀 GEOMETRY RENDER: {total_time:.2f}s | Seg: {seg_time:.2f}s | Tex: {tex_time:.2f}s | Render: {render_time:.2f}s | Encode: {encode_time:.2f}s", flush=True)
         return jsonify({
             'resultUrl': data_uri, # Frontend uses resultUrl, returning Base64 string works same as URL
             'timings': {
