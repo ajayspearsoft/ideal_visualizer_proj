@@ -13,11 +13,11 @@ WORKDIR /app
 # Install system dependencies for OpenCV and other ML libs
 # libgl1 is for OpenCV, libglib2 is for various libs, libxcb is what was missing
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
+    libxrender1 \
     libxcb1 \
     libx11-6 \
     gcc \
