@@ -199,18 +199,24 @@ def init_ocr():
 # ==========================================
 # CONFIGURATION
 # ==========================================
-# Serve React App in Production
-frontend_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'dist')
-app = Flask(__name__, static_folder=frontend_folder, static_url_path='/')
+app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_frontend(path):
-    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    else:
-        return send_from_directory(app.static_folder, 'index.html')
+# ==========================================
+# ROUTES
+# ==========================================
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "online",
+        "service": "Ideal Visualizer Backend",
+        "message": "API is running. Use /api/rooms or other endpoints.",
+        "timestamp": time.time()
+    })
+
+@app.route('/health')
+def health():
+    return jsonify({"status": "ok"}), 200
 
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
