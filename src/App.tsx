@@ -6,6 +6,7 @@ import AdminPanel from './components/AdminPanel'
 import AdminLogin from './components/AdminLogin'
 import AdminSignup from './components/AdminSignup'
 import LandingPage from './components/LandingPage'
+import AIInteriorCopilot from './components/AIInteriorCopilot'
 
 function App() {
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
@@ -32,6 +33,8 @@ function App() {
       setCurrentRoute('home')
     } else if (path === '/custom') {
       setCurrentRoute('custom')
+    } else if (path === '/copilot') {
+      setCurrentRoute('copilot')
     } else {
       setCurrentRoute('landing')
     }
@@ -45,6 +48,7 @@ function App() {
       if (path === '/admin') setCurrentRoute('admin')
       else if (path === '/home') setCurrentRoute('home')
       else if (path === '/custom') setCurrentRoute('custom')
+      else if (path === '/copilot') setCurrentRoute('copilot')
       else setCurrentRoute('landing')
     }
 
@@ -96,6 +100,10 @@ function App() {
     return <CustomUploadVisualizer onBack={() => setCurrentRoute('home')} userId={adminUser?.id} userName={adminUser?.name} />
   }
 
+  if (currentRoute === 'copilot') {
+    return <AIInteriorCopilot onBack={() => setCurrentRoute('landing')} userId={adminUser?.id} userName={adminUser?.name} />
+  }
+
   if (currentRoute === 'home') {
     if (selectedRoom) {
       return <Visualizer room={selectedRoom} onBack={() => setSelectedRoom(null)} userId={adminUser?.id} />
@@ -104,6 +112,7 @@ function App() {
       <RoomSelect
         onSelect={setSelectedRoom}
         onCustomAI={() => setCurrentRoute('custom')}
+        onCopilot={() => setCurrentRoute('copilot')}
         onAdmin={() => setCurrentRoute('admin')}
         onLogout={handleAdminLogout}
         userName={adminUser?.name}

@@ -1,4 +1,5 @@
 import React from 'react'
+import { Sparkles, Home, Upload, Palette, Wand2, ArrowRight, Zap, CheckCircle2 } from 'lucide-react'
 
 interface LandingPageProps {
   onNavigate: (route: string) => void;
@@ -6,123 +7,183 @@ interface LandingPageProps {
 
 export default function LandingPage({ onNavigate }: LandingPageProps) {
   return (
-    <div className="min-h-screen bg-[#f8f9fa] font-sans flex flex-col">
+    <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col selection:bg-blue-500/30">
+      {/* Decorative Background */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full"></div>
+        <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-emerald-600/5 blur-[120px] rounded-full"></div>
+      </div>
+
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+          <div className="flex items-center justify-between h-20">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gray-900 rounded-lg flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                </svg>
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-900/20">
+                <Home className="text-white" size={20} />
               </div>
-              <span className="text-lg font-bold text-gray-900 tracking-tight">
-                Studio Editor
-              </span>
+              <div className="flex flex-col">
+                <span className="text-xl font-black tracking-tight text-white">Ideal Visualizer</span>
+                <span className="text-[10px] uppercase tracking-widest text-blue-400 font-bold leading-none">AI Driven Studio</span>
+              </div>
             </div>
+            
+            <nav className="hidden md:flex items-center gap-8">
+              <a href="#" className="text-sm font-semibold text-slate-400 hover:text-white transition-colors">How it works</a>
+              <a href="#" className="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Pricing</a>
+              <a href="#" className="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Showcase</a>
+            </nav>
+
             <div className="flex items-center gap-4">
-              {/* Login and Signup buttons removed as per request */}
+               <button 
+                onClick={() => onNavigate('home')}
+                className="text-sm font-bold text-slate-300 hover:text-white px-4 py-2"
+               >
+                 Login
+               </button>
+               <button 
+                onClick={() => onNavigate('copilot')}
+                className="bg-white text-black px-6 py-2.5 rounded-full font-bold text-sm hover:bg-slate-100 transition-all active:scale-95 shadow-xl"
+               >
+                 Launch App
+               </button>
             </div>
           </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <div className="flex-1 bg-white relative overflow-hidden flex items-center">
-        <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-30"></div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 py-16 sm:py-24 lg:py-32 flex flex-col items-center text-center">
-          <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold text-gray-900 tracking-tight mb-6 max-w-4xl">
-            Visualize Your Walls & Floors <span className="text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-500">Instantly</span>
+      <main className="relative pt-32 lg:pt-48 pb-20 px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-widest mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <Sparkles size={14} />
+            <span>The Future of Interior Design is Here</span>
+          </div>
+          
+          <h1 className="text-5xl lg:text-8xl font-black tracking-tighter text-white mb-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            Design Your Dream Space <br />
+            <span className="bg-gradient-to-r from-blue-400 via-violet-400 to-emerald-400 bg-clip-text text-transparent">With Conversational AI</span>
           </h1>
-          <p className="text-lg sm:text-xl text-gray-500 mb-10 max-w-2xl leading-relaxed">
-            Upload a photo of your room, instantly apply stunning premium textures, and see your dream interior come to life before making any real-world changes.
+          
+          <p className="max-w-2xl mx-auto text-lg lg:text-xl text-slate-400 leading-relaxed mb-12 animate-in fade-in slide-in-from-bottom-12 duration-1000">
+            Upload a photo and chat with our AI to redesign your room. From luxury kitchen makeovers to minimalistic bedroom transformations—all in seconds.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-6 animate-in fade-in slide-in-from-bottom-16 duration-1000">
+            <button 
+              onClick={() => onNavigate('copilot')}
+              className="w-full sm:w-auto px-10 py-5 bg-gradient-to-r from-blue-600 to-violet-600 rounded-2xl font-black text-xl flex items-center justify-center gap-3 shadow-[0_20px_50px_rgba(37,99,235,0.3)] hover:shadow-[0_20px_60px_rgba(37,99,235,0.5)] transition-all active:scale-[0.98] group"
+            >
+              <Wand2 size={24} />
+              Try AI Copilot
+              <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+            </button>
+            
             <button 
               onClick={() => onNavigate('home')}
-              className="bg-gray-900 text-white px-12 py-4 rounded-2xl font-bold text-lg hover:bg-gray-800 transition-all shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-10 py-5 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl font-black text-xl hover:bg-white/10 transition-all flex items-center justify-center gap-3 shadow-2xl active:scale-[0.98]"
             >
-              Get Started
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+              <Palette size={24} />
+              Material Studio
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* Features Section */}
-      <div className="bg-[#f8f9fa] py-20 border-t border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">Professional Grade Tools</h2>
-            <p className="text-gray-500">Everything you need to design your perfect space.</p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            <FeatureCard 
-              icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />}
-              title="Upload Room Photo"
-              description="Start by uploading any high-quality photo of your own room."
-            />
-            <FeatureCard 
-              icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />}
-              title="Apply Textures"
-              description="Click exactly where you want to apply premium wall and floor textures."
-            />
-            <FeatureCard 
-              icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />}
-              title="Realistic Preview"
-              description="Our AI automatically blends lighting, shadows, and depth flawlessly."
-            />
-            <FeatureCard 
-              icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />}
-              title="Easy Comparison"
-              description="Toggle between your original photo and the new rendered design."
-            />
+          {/* Trust Badge / Stats */}
+          <div className="mt-24 grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto">
+             <StatItem value="10k+" label="Rooms Redesigned" />
+             <StatItem value="500+" label="AI Textures" />
+             <StatItem value="99.9%" label="Accuracy" />
+             <StatItem value="24/7" label="AI Assistant" />
           </div>
         </div>
-      </div>
+      </main>
 
-      {/* How It Works */}
-      <div className="bg-white py-20 border-t border-gray-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">How It Works</h2>
-            <p className="text-gray-500">Three simple steps to redesign your room.</p>
-          </div>
-          <div className="flex flex-col md:flex-row justify-center items-center gap-8 md:gap-4 relative">
-            {/* Connecting Line */}
-            <div className="hidden md:block absolute top-1/2 left-0 right-0 h-0.5 bg-gray-100 -z-10 -translate-y-1/2"></div>
-            
-            <Step number="1" title="Upload Image" text="Drop a photo of your space into the editor." />
-            <Step number="2" title="Choose Texture" text="Pick a premium material from the product catalog." />
-            <Step number="3" title="Instant Results" text="Watch the AI perfectly blend the new design." />
-          </div>
-        </div>
-      </div>
+      {/* Feature Showcase */}
+      <section className="py-32 px-6 lg:px-8 border-t border-white/5 relative bg-[#020617]/50">
+         <div className="max-w-7xl mx-auto">
+            <div className="flex flex-col lg:flex-row gap-16 items-center">
+               <div className="lg:w-1/2">
+                  <h2 className="text-4xl lg:text-6xl font-black tracking-tight mb-8">
+                     Room Understanding <br />
+                     <span className="text-blue-500">Meets Generative Art</span>
+                  </h2>
+                  <div className="space-y-6">
+                     <FeatureItem 
+                      icon={<Upload className="text-blue-400" />} 
+                      title="Upload & Analyze" 
+                      description="Our YOLO-SAM pipeline identifies walls, cabinets, and furniture with pixel-perfect precision." 
+                     />
+                     <FeatureItem 
+                      icon={<Zap className="text-emerald-400" />} 
+                      title="Instant Preview" 
+                      description="See architectural-grade renders in real-time with our depth-aware texture engine." 
+                     />
+                     <FeatureItem 
+                      icon={<Wand2 className="text-purple-400" />} 
+                      title="Generative Overhaul" 
+                      description="Use natural language to trigger complete room redesigns via DALL-E 3 and SDXL." 
+                     />
+                  </div>
+               </div>
+               <div className="lg:w-1/2 relative group">
+                  <div className="absolute -inset-4 bg-gradient-to-r from-blue-600 to-violet-600 rounded-[2.5rem] blur-2xl opacity-20 group-hover:opacity-40 transition-opacity"></div>
+                  <div className="relative aspect-[4/3] rounded-[2rem] overflow-hidden border border-white/10 shadow-2xl">
+                     <img 
+                      src="https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=1200" 
+                      className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
+                      alt="AI Interior Showcase"
+                     />
+                     <div className="absolute inset-0 bg-gradient-to-t from-[#020617] via-transparent to-transparent"></div>
+                     <div className="absolute bottom-8 left-8 right-8 p-6 bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl">
+                        <div className="flex items-center gap-4 mb-3">
+                           <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-[10px] font-bold">AI</div>
+                           <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Prompt Applied</span>
+                        </div>
+                        <p className="text-lg font-bold text-white italic">"Convert this to a luxury modern kitchen with white marble and gold accents"</p>
+                     </div>
+                  </div>
+               </div>
+            </div>
+         </div>
+      </section>
+
+      {/* CTA Footer */}
+      <footer className="py-20 border-t border-white/5 bg-[#020617]">
+         <div className="max-w-7xl mx-auto px-6 lg:px-8 text-center">
+            <h2 className="text-3xl font-bold mb-8">Ready to transform your home?</h2>
+            <button 
+              onClick={() => onNavigate('copilot')}
+              className="px-12 py-5 bg-white text-black rounded-2xl font-black text-xl hover:bg-slate-100 transition-all active:scale-95 shadow-2xl"
+            >
+              Get Started for Free
+            </button>
+            <p className="mt-12 text-slate-500 text-sm">© 2026 Ideal Visualizer AI. All rights reserved.</p>
+         </div>
+      </footer>
     </div>
   )
 }
 
-function FeatureCard({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) {
+function StatItem({ value, label }: { value: string, label: string }) {
   return (
-    <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-      <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-900 mb-6">
-        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">{icon}</svg>
-      </div>
-      <h3 className="text-xl font-bold text-gray-900 mb-3">{title}</h3>
-      <p className="text-gray-500 leading-relaxed">{description}</p>
+    <div className="flex flex-col items-center">
+      <span className="text-3xl lg:text-4xl font-black text-white mb-1">{value}</span>
+      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest text-center">{label}</span>
     </div>
   )
 }
 
-function Step({ number, title, text }: { number: string, title: string, text: string }) {
+function FeatureItem({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) {
   return (
-    <div className="bg-white w-full md:w-1/3 flex flex-col items-center text-center p-6">
-      <div className="w-16 h-16 bg-gray-900 text-white rounded-full flex items-center justify-center text-2xl font-bold shadow-lg mb-6 ring-8 ring-white">
-        {number}
+    <div className="flex gap-6 items-start">
+      <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center shrink-0 border border-white/10">
+        {icon}
       </div>
-      <h3 className="text-xl font-bold text-gray-900 mb-3">{title}</h3>
-      <p className="text-gray-500">{text}</p>
+      <div>
+        <h4 className="text-xl font-bold text-white mb-2">{title}</h4>
+        <p className="text-slate-400 leading-relaxed">{description}</p>
+      </div>
     </div>
   )
 }

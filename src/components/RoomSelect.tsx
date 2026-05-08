@@ -1,6 +1,7 @@
 export default function RoomSelect({ 
   onSelect, 
   onCustomAI, 
+  onCopilot,
   onAdmin, 
   onLogout, 
   userName, 
@@ -8,6 +9,7 @@ export default function RoomSelect({
 }: { 
   onSelect: (room: any) => void, 
   onCustomAI?: () => void, 
+  onCopilot?: () => void,
   onAdmin?: () => void, 
   onLogout?: () => void, 
   userName?: string,
@@ -67,26 +69,51 @@ export default function RoomSelect({
           </p>
         </div>
 
-        <div className="w-full max-w-2xl">
+        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-6">
           <button
             onClick={onCustomAI}
-            className="group relative w-full bg-white p-6 sm:p-8 rounded-2xl border-2 border-dashed border-blue-200 hover:border-blue-500 transition-all duration-300 shadow-sm hover:shadow-xl flex flex-col items-center text-center overflow-hidden active:scale-[0.98]"
+            className="group relative bg-white p-6 sm:p-8 rounded-2xl border-2 border-dashed border-blue-200 hover:border-blue-500 transition-all duration-300 shadow-sm hover:shadow-xl flex flex-col items-center text-center overflow-hidden active:scale-[0.98]"
           >
             <div className="absolute inset-0 bg-blue-50/50 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <div className="relative z-10 w-16 h-16 sm:w-20 sm:h-20 bg-blue-600 rounded-2xl flex items-center justify-center text-white mb-4 sm:mb-6 shadow-lg group-hover:rotate-6 transition-transform">
-              <svg className="w-8 h-8 sm:w-10 sm:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.456-2.454L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.454zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+            <div className="relative z-10 w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white mb-4 shadow-lg group-hover:rotate-6 transition-transform">
+              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
               </svg>
             </div>
             <div className="relative z-10">
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Launch Custom AI Visualizer</h2>
-              <p className="text-gray-500 text-sm max-w-sm mx-auto">
-                Upload your room photo and let our AI handle the masking and segmenting for perfect results.
+              <h2 className="text-xl font-bold text-gray-900 mb-2">Launch Studio Visualizer</h2>
+              <p className="text-gray-500 text-sm">
+                Upload your room photo and use our precision manual editing tools.
               </p>
             </div>
-            <div className="mt-4 sm:mt-6 flex items-center gap-2 text-blue-600 font-bold text-sm sm:text-base">
+            <div className="mt-4 flex items-center gap-2 text-blue-600 font-bold text-sm">
               <span>Start Designing Now</span>
-              <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+              <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+            </div>
+          </button>
+
+          <button
+            onClick={onCopilot}
+            className="group relative bg-slate-900 p-6 sm:p-8 rounded-2xl border-2 border-transparent hover:border-blue-500/50 transition-all duration-300 shadow-2xl hover:shadow-blue-500/20 flex flex-col items-center text-center overflow-hidden active:scale-[0.98]"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 to-purple-600/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="relative z-10 w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white mb-4 shadow-[0_10px_20px_rgba(37,99,235,0.4)] group-hover:scale-110 transition-transform">
+              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+              </svg>
+            </div>
+            <div className="relative z-10">
+              <h2 className="text-xl font-bold text-white mb-2">Try AI Interior Copilot</h2>
+              <p className="text-slate-400 text-sm">
+                Redesign your space using conversational AI and generative magic.
+              </p>
+            </div>
+            <div className="mt-4 flex items-center gap-2 text-blue-400 font-bold text-sm">
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Instant AI Generation
+              </span>
+              <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </div>
           </button>
         </div>

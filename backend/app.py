@@ -62,10 +62,15 @@ from bson import ObjectId
 import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
 import traceback
+from openai import OpenAI
 try:
     from docx import Document
 except ImportError:
     Document = None
+
+# Initialize OpenAI client
+openai_api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 
 def decode_image(image_bytes):
     """Robustly decode image from bytes using OpenCV, PIL, and Base64 fallbacks."""
@@ -2230,7 +2235,7 @@ def upload_room():
         return jsonify({
             'success': True,
             'session_id': image_hash,
-            'dimensions': {'w': new_w, 'h': new_h},
+            'dimensions': {'w': w_orig, 'h': h_orig},
             'time': round(time.time() - start_time, 2)
         })
         
@@ -2456,6 +2461,194 @@ def get_code_from_pdf():
         return jsonify({'error': str(e)}), 500
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+# ==========================================
+# AI COPILOT CONVERSATIONAL ROUTES
+# ==========================================
+
+@app.route('/api/ai-chat', methods=['POST'])
+def ai_chat():
+    """
+    CONVERSATIONAL AI PARSER:
+    Converts natural language user requests into structured tasks.
+    """
+    if not client:
+        return jsonify({'error': 'OpenAI API key not configured'}), 500
+
+    try:
+        data = request.json
+        prompt = data.get('prompt')
+        session_id = data.get('session_id')
+        
+        if not prompt:
+            return jsonify({'error': 'Missing prompt'}), 400
+
+        # System Prompt for Interior Design Parsing
+        system_message = """
+        You are an AI Interior Design Copilot. Your task is to analyze user requests.
+        
+        If the user is just saying hello, greeting you, or asking general questions, return:
+        { "action": "chat", "response": "A friendly response to the user." }
+        
+        If the user is asking to edit a room, return a JSON task:
+        Available Actions:
+        1. 'recolor': Change color/texture.
+        2. 'redesign': Complete overhaul.
+        3. 'add': Add an object.
+        4. 'remove': Remove an object.
+        
+        Output format for tasks:
+        {
+          "action": "recolor" | "redesign" | "add" | "remove",
+          "target": "wall" | "floor" | "cabinet" | "sofa" | "all" | string,
+          "color": string | null,
+          "style": string | null,
+          "description": string,
+          "response": "A short confirmation message (e.g., 'I will change the wall to blue for you!')"
+        }
+        """
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        # Calculate Cost for GPT-4o
+        usage = response.usage
+        input_cost = (usage.prompt_tokens / 1000000) * 5.00
+        output_cost = (usage.completion_tokens / 1000000) * 15.00
+        total_cost = input_cost + output_cost
+        
+        print(f"\n[AI COST] GPT-4o Chat: ${total_cost:.6f} (Tokens: {usage.total_tokens})", flush=True)
+        
+        import json
+        task_json = json.loads(response.choices[0].message.content)
+        
+        # Validation for Chat vs Task
+        if task_json.get('action') == 'chat':
+            return jsonify({
+                'success': True,
+                'task': task_json,
+                'cost': f"${total_cost:.6f}",
+                'response': task_json.get('response', "Hello! How can I help you design your space today?")
+            })
+
+        return jsonify({
+            'success': True,
+            'task': task_json,
+            'cost': f"${total_cost:.6f}",
+            'response': task_json.get('response', f"I understand! You want to {task_json.get('action')} the {task_json.get('target')}.")
+        })
+
+    except Exception as e:
+        print(f"AI Chat Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai-redesign', methods=['POST'])
+def ai_redesign():
+    """
+    GENERATIVE AI REDESIGN:
+    Uses DALL-E 3 (or Flux simulation) to perform high-fidelity room transformations.
+    """
+    if not client:
+        return jsonify({'error': 'OpenAI API key not configured'}), 500
+
+    try:
+        data = request.json
+        user_prompt = data.get('prompt')
+        session_id = data.get('session_id')
+        target = data.get('target', 'all') # Can be 'all', 'wall', 'floor', etc.
+        
+        if not user_prompt:
+            return jsonify({'error': 'Missing prompt'}), 400
+
+        # Get original image from cache
+        if not session_id or session_id not in room_session_cache:
+            return jsonify({'error': 'Session expired'}), 400
+            
+        session = room_session_cache[session_id]
+        image_rgb = session['image_ai']
+        
+        # 1. STRATEGY A: Surgical In-painting (DALL-E 2)
+        # Best for: "Change the sofa", "Recolor floor", "Add a lamp"
+        # Benefit: 100% PRESERVATION of original pixels outside the mask.
+        if target != 'all' and target in ['wall', 'floor', 'ceiling', 'sofa', 'cabinet']:
+            print(f"[AI EDIT] Using Surgical In-painting for: {target}")
+            
+            img_rgba = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2RGBA)
+            mask = session['mask_ai']
+            mask_rgba = np.zeros_like(img_rgba)
+            # DALL-E 2 mask: Transparent pixels (0) ARE edited, Opaque pixels (255) are PROTECTED.
+            # We want to edit the wall/floor, so those areas must be transparent.
+            mask_rgba[:, :, 3] = ((1 - mask) * 255).astype(np.uint8) 
+            
+            # Convert to bytes and wrap in BytesIO (OpenAI requirement)
+            import io
+            _, img_encoded = cv2.imencode('.png', cv2.cvtColor(img_rgba, cv2.COLOR_RGBA2BGRA))
+            _, mask_encoded = cv2.imencode('.png', cv2.cvtColor(mask_rgba, cv2.COLOR_RGBA2BGRA))
+            
+            img_io = io.BytesIO(img_encoded.tobytes())
+            img_io.name = "image.png"
+            mask_io = io.BytesIO(mask_encoded.tobytes())
+            mask_io.name = "mask.png"
+            
+            response = client.images.edit(
+                model="dall-e-2",
+                image=img_io,
+                mask=mask_io,
+                prompt=f"A professional interior design edit: {user_prompt}. Seamlessly blend with the existing lighting.",
+                n=1,
+                size="1024x1024"
+            )
+            result_url = response.data[0].url
+            cost = 0.020 
+        else:
+            # 2. STRATEGY B: Vision-Guided Redesign (DALL-E 3)
+            # Best for: "Make it luxury", "Change the whole style"
+            # Benefit: High fidelity, anchored to original layout via Vision description.
+            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+            import base64
+            base64_image = base64.b64encode(buffer).decode('utf-8')
+
+            vision_response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "Describe the architectural layout and furniture positions of this room identically. Use absolute spatial terms."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]}
+                ],
+                max_tokens=150
+            )
+            room_desc = vision_response.choices[0].message.content
+            
+            full_prompt = f"Professional photo. PHOTO-REALISTIC. MAINTAIN THE EXACT ARCHITECTURE: {room_desc}. APPLY CHANGE: {user_prompt}. DO NOT MOVE WALLS OR FURNITURE. MATCH CAMERA ANGLE EXACTLY."
+            
+            response = client.images.generate(
+                model="dall-e-3",
+                prompt=full_prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+            result_url = response.data[0].url
+            cost = 0.040
+
+        print(f"[AI COST] Final Output: ${cost:.3f}", flush=True)
+        return jsonify({
+            'success': True,
+            'resultUrl': result_url,
+            'cost': f"${cost:.3f}",
+            'message': "The design edit is complete!"
+        })
+
+    except Exception as e:
+        print(f"AI Redesign Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # ==========================================
 # AUTHENTICATION ROUTES
 # ==========================================
