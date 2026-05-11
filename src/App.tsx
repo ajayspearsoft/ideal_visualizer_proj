@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import RoomSelect from './components/RoomSelect'
+// RoomSelect removed as per request
 import Visualizer from './components/Visualizer'
 import CustomUploadVisualizer from './components/CustomUploadVisualizer'
 import AdminPanel from './components/AdminPanel'
@@ -15,6 +15,7 @@ function App() {
   const [adminAuthMode, setAdminAuthMode] = useState<'login' | 'signup'>('login')
   const [adminUser, setAdminUser] = useState<{ name?: string, id?: string | number } | null>(null)
   const [isReady, setIsReady] = useState(false)
+  const [pendingImage, setPendingImage] = useState<File | null>(null)
 
   useEffect(() => {
     const adminAuth = localStorage.getItem('isAdminAuthenticated')
@@ -30,11 +31,9 @@ function App() {
     if (path === '/admin') {
       setCurrentRoute('admin')
     } else if (path === '/home') {
-      setCurrentRoute('home')
+      setCurrentRoute('landing') // Redirect home to landing
     } else if (path === '/custom') {
       setCurrentRoute('custom')
-    } else if (path === '/copilot') {
-      setCurrentRoute('copilot')
     } else {
       setCurrentRoute('landing')
     }
@@ -46,9 +45,8 @@ function App() {
     const handlePopState = () => {
       const path = window.location.pathname
       if (path === '/admin') setCurrentRoute('admin')
-      else if (path === '/home') setCurrentRoute('home')
+      else if (path === '/home') setCurrentRoute('landing')
       else if (path === '/custom') setCurrentRoute('custom')
-      else if (path === '/copilot') setCurrentRoute('copilot')
       else setCurrentRoute('landing')
     }
 
@@ -86,7 +84,10 @@ function App() {
     setCurrentRoute('landing')
   }
 
-  const handleNavigate = (route: string) => {
+  const handleNavigate = (route: string, data?: any) => {
+    if (route === 'custom' && data instanceof File) {
+      setPendingImage(data)
+    }
     setCurrentRoute(route)
   }
 
@@ -97,28 +98,29 @@ function App() {
   }
 
   if (currentRoute === 'custom') {
-    return <CustomUploadVisualizer onBack={() => setCurrentRoute('home')} userId={adminUser?.id} userName={adminUser?.name} />
+    return (
+      <CustomUploadVisualizer 
+        onBack={() => {
+          setPendingImage(null)
+          setCurrentRoute('landing')
+        }} 
+        userId={adminUser?.id} 
+        userName={adminUser?.name}
+        initialImage={pendingImage}
+      />
+    )
   }
 
+  // Copilot hidden as per request
+  /*
   if (currentRoute === 'copilot') {
     return <AIInteriorCopilot onBack={() => setCurrentRoute('landing')} userId={adminUser?.id} userName={adminUser?.name} />
   }
+  */
 
+  // Home route removed as per request, always redirect to landing if somehow hit
   if (currentRoute === 'home') {
-    if (selectedRoom) {
-      return <Visualizer room={selectedRoom} onBack={() => setSelectedRoom(null)} userId={adminUser?.id} />
-    }
-    return (
-      <RoomSelect
-        onSelect={setSelectedRoom}
-        onCustomAI={() => setCurrentRoute('custom')}
-        onCopilot={() => setCurrentRoute('copilot')}
-        onAdmin={() => setCurrentRoute('admin')}
-        onLogout={handleAdminLogout}
-        userName={adminUser?.name}
-        showAuth={false}
-      />
-    )
+    return <LandingPage onNavigate={handleNavigate} />
   }
 
   if (currentRoute === 'admin') {
@@ -128,7 +130,7 @@ function App() {
       }
       return <AdminLogin onLogin={handleAdminLogin} onSwitchToSignup={() => setAdminAuthMode('signup')} />
     }
-    return <AdminPanel onBack={() => setCurrentRoute('home')} onLogout={handleAdminLogout} userName={adminUser?.name} userId={adminUser?.id} />
+    return <AdminPanel onBack={() => setCurrentRoute('landing')} onLogout={handleAdminLogout} userName={adminUser?.name} userId={adminUser?.id} />
   }
 
   return null

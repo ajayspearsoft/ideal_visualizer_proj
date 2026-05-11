@@ -1,189 +1,290 @@
-import React from 'react'
-import { Sparkles, Home, Upload, Palette, Wand2, ArrowRight, Zap, CheckCircle2 } from 'lucide-react'
+import React, { useRef } from 'react'
+import { Sparkles, Home, Upload, Palette, ArrowRight, Camera, Image as ImageIcon, CheckCircle2, Shield, Layers, MousePointer2 } from 'lucide-react'
 
 interface LandingPageProps {
-  onNavigate: (route: string) => void;
+  onNavigate: (route: string, data?: any) => void;
 }
 
 export default function LandingPage({ onNavigate }: LandingPageProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, isCamera: boolean) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      onNavigate('custom', file);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col selection:bg-blue-500/30">
-      {/* Decorative Background */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full"></div>
-        <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-emerald-600/5 blur-[120px] rounded-full"></div>
-      </div>
+    <div className="min-h-screen bg-[#fcfcfc] text-[#1a1a1a] font-sans flex flex-col selection:bg-stone-200">
+      {/* Subtle Texture Overlay */}
+      <div className="fixed inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/natural-paper.png")' }}></div>
 
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-stone-100">
+        <div className="max-w-7xl mx-auto px-6 lg:px-12">
           <div className="flex items-center justify-between h-20">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-900/20">
-                <Home className="text-white" size={20} />
+            <div className="flex items-center gap-4">
+              <div className="w-8 h-8 bg-[#1a1a1a] rounded flex items-center justify-center">
+                <Home className="text-white" size={16} />
               </div>
               <div className="flex flex-col">
-                <span className="text-xl font-black tracking-tight text-white">Ideal Visualizer</span>
-                <span className="text-[10px] uppercase tracking-widest text-blue-400 font-bold leading-none">AI Driven Studio</span>
+                <span className="text-lg font-bold tracking-tight text-[#1a1a1a] font-serif">Ideal Visualizer</span>
+                <span className="text-[9px] uppercase tracking-[0.2em] text-stone-400 font-medium leading-none">Interior Intelligence</span>
               </div>
             </div>
-            
-            <nav className="hidden md:flex items-center gap-8">
-              <a href="#" className="text-sm font-semibold text-slate-400 hover:text-white transition-colors">How it works</a>
-              <a href="#" className="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Pricing</a>
-              <a href="#" className="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Showcase</a>
+
+            <nav className="hidden lg:flex items-center gap-12">
+              <a href="#" className="text-xs font-bold uppercase tracking-widest text-stone-400 hover:text-[#1a1a1a] transition-colors">Studio</a>
+              <a href="#" className="text-xs font-bold uppercase tracking-widest text-stone-400 hover:text-[#1a1a1a] transition-colors">Materials</a>
+              <a href="#" className="text-xs font-bold uppercase tracking-widest text-stone-400 hover:text-[#1a1a1a] transition-colors">Portfolio</a>
             </nav>
 
-            <div className="flex items-center gap-4">
-               <button 
+            <div className="flex items-center gap-6">
+              <button
                 onClick={() => onNavigate('home')}
-                className="text-sm font-bold text-slate-300 hover:text-white px-4 py-2"
-               >
-                 Login
-               </button>
-               <button 
-                onClick={() => onNavigate('copilot')}
-                className="bg-white text-black px-6 py-2.5 rounded-full font-bold text-sm hover:bg-slate-100 transition-all active:scale-95 shadow-xl"
-               >
-                 Launch App
-               </button>
+                className="hidden sm:block text-xs font-bold uppercase tracking-widest text-stone-400 hover:text-[#1a1a1a] transition-colors"
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-[#1a1a1a] text-white px-8 py-3 rounded-none font-bold text-xs uppercase tracking-widest hover:bg-stone-800 transition-all active:scale-95 shadow-sm"
+              >
+                Launch Editor
+              </button>
             </div>
           </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <main className="relative pt-32 lg:pt-48 pb-20 px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-widest mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <Sparkles size={14} />
-            <span>The Future of Interior Design is Here</span>
-          </div>
-          
-          <h1 className="text-5xl lg:text-8xl font-black tracking-tighter text-white mb-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
-            Design Your Dream Space <br />
-            <span className="bg-gradient-to-r from-blue-400 via-violet-400 to-emerald-400 bg-clip-text text-transparent">With Conversational AI</span>
-          </h1>
-          
-          <p className="max-w-2xl mx-auto text-lg lg:text-xl text-slate-400 leading-relaxed mb-12 animate-in fade-in slide-in-from-bottom-12 duration-1000">
-            Upload a photo and chat with our AI to redesign your room. From luxury kitchen makeovers to minimalistic bedroom transformations—all in seconds.
-          </p>
+      <main className="relative pt-28 lg:pt-36 pb-20 px-6 lg:px-12">
+        <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-20 items-center">
+          <div className="flex flex-col items-start text-left">
+            <div className="inline-flex items-center gap-3 px-0 py-2 text-stone-400 text-[10px] font-bold uppercase tracking-[0.3em] mb-6">
+              <div className="w-8 h-px bg-stone-200"></div>
+              <span>Atelier of Vision</span>
+            </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-6 animate-in fade-in slide-in-from-bottom-16 duration-1000">
-            <button 
-              onClick={() => onNavigate('copilot')}
-              className="w-full sm:w-auto px-10 py-5 bg-gradient-to-r from-blue-600 to-violet-600 rounded-2xl font-black text-xl flex items-center justify-center gap-3 shadow-[0_20px_50px_rgba(37,99,235,0.3)] hover:shadow-[0_20px_60px_rgba(37,99,235,0.5)] transition-all active:scale-[0.98] group"
-            >
-              <Wand2 size={24} />
-              Try AI Copilot
-              <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-            </button>
-            
-            <button 
-              onClick={() => onNavigate('home')}
-              className="w-full sm:w-auto px-10 py-5 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl font-black text-xl hover:bg-white/10 transition-all flex items-center justify-center gap-3 shadow-2xl active:scale-[0.98]"
-            >
-              <Palette size={24} />
-              Material Studio
-            </button>
+            <h1 className="text-6xl lg:text-8xl font-medium tracking-tight text-[#1a1a1a] mb-10 leading-[0.95] font-serif">
+              Design with <br />
+              <span className="italic text-stone-400">Pure Precision.</span>
+            </h1>
+
+            <p className="max-w-md text-lg text-stone-600 leading-relaxed mb-12 font-light">
+              Transform architectural spaces with our high-fidelity material visualizer. Professional-grade rendering for modern interiors.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex items-center justify-center gap-3 px-10 py-5 bg-[#1a1a1a] text-white text-xs font-bold uppercase tracking-widest hover:bg-stone-800 transition-all shadow-lg animate-pulse-subtle"
+              >
+                <Camera size={18} />
+                Capture Room
+                <input
+                  type="file"
+                  ref={cameraInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => handleFileChange(e, true)}
+                />
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center justify-center gap-3 px-10 py-5 bg-white border border-stone-200 text-[#1a1a1a] text-xs font-bold uppercase tracking-widest hover:bg-stone-50 transition-all"
+              >
+                <Upload size={18} />
+                Upload Image
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => handleFileChange(e, false)}
+                />
+              </button>
+            </div>
           </div>
 
-          {/* Trust Badge / Stats */}
-          <div className="mt-24 grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto">
-             <StatItem value="10k+" label="Rooms Redesigned" />
-             <StatItem value="500+" label="AI Textures" />
-             <StatItem value="99.9%" label="Accuracy" />
-             <StatItem value="24/7" label="AI Assistant" />
+          <div className="relative group">
+            <div className="absolute -inset-4 bg-stone-100 rounded-sm scale-95 group-hover:scale-100 transition-transform duration-1000 -z-10"></div>
+            <div className="aspect-[4/5] bg-stone-50 overflow-hidden shadow-2xl relative">
+              <img
+                src="https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=1200"
+                className="w-full h-full object-cover grayscale-[0.3] group-hover:grayscale-0 transition-all duration-[2s]"
+                alt="Minimalist Interior"
+              />
+              <div className="absolute inset-0 border-[24px] border-white/10 pointer-events-none"></div>
+              <div className="absolute bottom-12 right-0 bg-white p-8 shadow-2xl max-w-xs translate-x-12 hidden lg:block">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-stone-300 mb-4">Current Palette</p>
+                <div className="flex gap-2 mb-6">
+                  <div className="w-8 h-8 bg-stone-800"></div>
+                  <div className="w-8 h-8 bg-stone-400"></div>
+                  <div className="w-8 h-8 bg-stone-200"></div>
+                  <div className="w-8 h-8 bg-[#fdfdfb] border border-stone-100"></div>
+                </div>
+                <p className="text-sm font-medium text-stone-600 leading-relaxed italic">
+                  "Simplicity is the ultimate sophistication."
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </main>
 
-      {/* Feature Showcase */}
-      <section className="py-32 px-6 lg:px-8 border-t border-white/5 relative bg-[#020617]/50">
-         <div className="max-w-7xl mx-auto">
-            <div className="flex flex-col lg:flex-row gap-16 items-center">
-               <div className="lg:w-1/2">
-                  <h2 className="text-4xl lg:text-6xl font-black tracking-tight mb-8">
-                     Room Understanding <br />
-                     <span className="text-blue-500">Meets Generative Art</span>
-                  </h2>
-                  <div className="space-y-6">
-                     <FeatureItem 
-                      icon={<Upload className="text-blue-400" />} 
-                      title="Upload & Analyze" 
-                      description="Our YOLO-SAM pipeline identifies walls, cabinets, and furniture with pixel-perfect precision." 
-                     />
-                     <FeatureItem 
-                      icon={<Zap className="text-emerald-400" />} 
-                      title="Instant Preview" 
-                      description="See architectural-grade renders in real-time with our depth-aware texture engine." 
-                     />
-                     <FeatureItem 
-                      icon={<Wand2 className="text-purple-400" />} 
-                      title="Generative Overhaul" 
-                      description="Use natural language to trigger complete room redesigns via DALL-E 3 and SDXL." 
-                     />
-                  </div>
-               </div>
-               <div className="lg:w-1/2 relative group">
-                  <div className="absolute -inset-4 bg-gradient-to-r from-blue-600 to-violet-600 rounded-[2.5rem] blur-2xl opacity-20 group-hover:opacity-40 transition-opacity"></div>
-                  <div className="relative aspect-[4/3] rounded-[2rem] overflow-hidden border border-white/10 shadow-2xl">
-                     <img 
-                      src="https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=1200" 
-                      className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
-                      alt="AI Interior Showcase"
-                     />
-                     <div className="absolute inset-0 bg-gradient-to-t from-[#020617] via-transparent to-transparent"></div>
-                     <div className="absolute bottom-8 left-8 right-8 p-6 bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl">
-                        <div className="flex items-center gap-4 mb-3">
-                           <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-[10px] font-bold">AI</div>
-                           <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Prompt Applied</span>
-                        </div>
-                        <p className="text-lg font-bold text-white italic">"Convert this to a luxury modern kitchen with white marble and gold accents"</p>
-                     </div>
-                  </div>
-               </div>
-            </div>
-         </div>
+      {/* Feature Section - Atelier Style */}
+      <section className="py-20 px-6 lg:px-12 bg-white">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-16 lg:gap-24">
+            <FeatureCard
+              number="01"
+              title="Neural Texture Mapping"
+              description="Our AI understands the geometry of your room, wrapping textures naturally around corners and perspectives."
+            />
+            <FeatureCard
+              number="02"
+              title="Material Fidelity"
+              description="Library of physically-based materials that react to lighting and shadows with photorealistic accuracy."
+            />
+            <FeatureCard
+              number="03"
+              title="Design Continuity"
+              description="Seamlessly save and export your visualizations to share with clients, architects, or showrooms."
+            />
+          </div>
+        </div>
       </section>
 
-      {/* CTA Footer */}
-      <footer className="py-20 border-t border-white/5 bg-[#020617]">
-         <div className="max-w-7xl mx-auto px-6 lg:px-8 text-center">
-            <h2 className="text-3xl font-bold mb-8">Ready to transform your home?</h2>
-            <button 
-              onClick={() => onNavigate('copilot')}
-              className="px-12 py-5 bg-white text-black rounded-2xl font-black text-xl hover:bg-slate-100 transition-all active:scale-95 shadow-2xl"
-            >
-              Get Started for Free
-            </button>
-            <p className="mt-12 text-slate-500 text-sm">© 2026 Ideal Visualizer AI. All rights reserved.</p>
-         </div>
+      {/* The Process - NEW CONTENT */}
+      <section className="py-20 px-6 lg:px-12 bg-stone-50 border-y border-stone-100">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col items-center text-center mb-16">
+            <h2 className="text-sm font-bold text-stone-400 uppercase tracking-[0.4em] mb-4">The Process</h2>
+            <p className="text-2xl font-serif italic text-stone-600">Simplicity in every step.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-12">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-white border border-stone-200 flex items-center justify-center text-stone-300">
+                <Camera size={20} />
+              </div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest">Photograph</h4>
+            </div>
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-white border border-stone-200 flex items-center justify-center text-stone-300">
+                <MousePointer2 size={20} />
+              </div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest">Select Area</h4>
+            </div>
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-white border border-stone-200 flex items-center justify-center text-stone-300">
+                <Palette size={20} />
+              </div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest">Apply Design</h4>
+            </div>
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-white border border-stone-200 flex items-center justify-center text-stone-300">
+                <CheckCircle2 size={20} />
+              </div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest">Export Vision</h4>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Second Hero / Showcase */}
+      <section className="py-20 px-6 lg:px-12 border-t border-stone-100">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col lg:flex-row-reverse gap-24 items-center">
+            <div className="lg:w-1/2 flex flex-col items-start">
+              <h2 className="text-4xl lg:text-5xl font-medium tracking-tight mb-10 font-serif leading-tight">
+                Beyond Simple Overlays. <br />
+                <span className="text-stone-400 italic">True Materiality.</span>
+              </h2>
+              <p className="text-stone-600 text-lg leading-relaxed mb-12 font-light">
+                We don't just change colors. We change the soul of the space. Every stone grain, every paint matte, and every tile reflection is calculated to match the original environment.
+              </p>
+              <button
+                onClick={() => onNavigate('home')}
+                className="flex items-center gap-4 text-[#1a1a1a] font-bold text-xs uppercase tracking-[0.2em] group"
+              >
+                Explore Studio Showcase
+                <div className="w-10 h-[1px] bg-[#1a1a1a] group-hover:w-16 transition-all"></div>
+              </button>
+            </div>
+            <div className="lg:w-1/2">
+              <div className="aspect-[16/10] bg-stone-100 overflow-hidden shadow-sm group">
+                <img
+                  src="https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=1200"
+                  className="w-full h-full object-cover transition-transform duration-[3s] group-hover:scale-105"
+                  alt="Interior Detail"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer - Minimalist */}
+      <footer className="py-24 border-t border-stone-100 bg-[#fcfcfc]">
+        <div className="max-w-7xl mx-auto px-6 lg:px-12">
+          <div className="flex flex-col md:flex-row justify-between items-start gap-16">
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center gap-3">
+                <div className="w-6 h-6 bg-[#1a1a1a] rounded-sm"></div>
+                <span className="text-lg font-bold text-[#1a1a1a] font-serif">Ideal Visualizer</span>
+              </div>
+              <p className="text-xs text-stone-400 uppercase tracking-widest max-w-xs leading-loose">
+                The essential tool for modern interior visualization. Precision. Clarity. Vision.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-20">
+              <div className="flex flex-col gap-6">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-stone-300">Navigation</h4>
+                <ul className="flex flex-col gap-4 text-xs font-bold text-stone-500">
+                  <li><a href="#" className="hover:text-[#1a1a1a] transition-colors">Studio</a></li>
+                  <li><a href="#" className="hover:text-[#1a1a1a] transition-colors">Materials</a></li>
+                  <li><a href="#" className="hover:text-[#1a1a1a] transition-colors">Contact</a></li>
+                </ul>
+              </div>
+              <div className="flex flex-col gap-6">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-stone-300">Social</h4>
+                <ul className="flex flex-col gap-4 text-xs font-bold text-stone-500">
+                  <li><a href="#" className="hover:text-[#1a1a1a] transition-colors">Instagram</a></li>
+                  <li><a href="#" className="hover:text-[#1a1a1a] transition-colors">LinkedIn</a></li>
+                  <li><a href="#" className="hover:text-[#1a1a1a] transition-colors">Behance</a></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div className="mt-24 pt-12 border-t border-stone-100 flex justify-between items-center">
+            <span className="text-[10px] font-bold text-stone-300 uppercase tracking-widest">© 2026 Ideal Visualizer AI</span>
+            <div className="flex gap-8">
+              <a href="#" className="text-[10px] font-bold text-stone-300 uppercase tracking-widest hover:text-[#1a1a1a]">Privacy</a>
+              <a href="#" className="text-[10px] font-bold text-stone-300 uppercase tracking-widest hover:text-[#1a1a1a]">Terms</a>
+            </div>
+          </div>
+        </div>
       </footer>
     </div>
   )
 }
 
-function StatItem({ value, label }: { value: string, label: string }) {
+function FeatureCard({ number, title, description }: { number: string, title: string, description: string }) {
   return (
-    <div className="flex flex-col items-center">
-      <span className="text-3xl lg:text-4xl font-black text-white mb-1">{value}</span>
-      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest text-center">{label}</span>
-    </div>
-  )
-}
-
-function FeatureItem({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) {
-  return (
-    <div className="flex gap-6 items-start">
-      <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center shrink-0 border border-white/10">
-        {icon}
+    <div className="flex flex-col gap-8 group">
+      <div className="text-6xl font-serif text-stone-100 group-hover:text-stone-200 transition-colors duration-500">
+        {number}
       </div>
       <div>
-        <h4 className="text-xl font-bold text-white mb-2">{title}</h4>
-        <p className="text-slate-400 leading-relaxed">{description}</p>
+        <h4 className="text-lg font-bold text-[#1a1a1a] mb-4 tracking-tight">{title}</h4>
+        <p className="text-stone-500 text-sm leading-relaxed font-light">{description}</p>
       </div>
+      <div className="w-12 h-[1px] bg-stone-200 group-hover:w-full transition-all duration-700"></div>
     </div>
   )
 }
