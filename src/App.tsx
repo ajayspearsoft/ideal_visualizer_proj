@@ -34,6 +34,8 @@ function App() {
       setCurrentRoute('landing') // Redirect home to landing
     } else if (path === '/custom') {
       setCurrentRoute('custom')
+    } else if (path === '/copilot') {
+      setCurrentRoute('copilot')
     } else {
       setCurrentRoute('landing')
     }
@@ -47,6 +49,7 @@ function App() {
       if (path === '/admin') setCurrentRoute('admin')
       else if (path === '/home') setCurrentRoute('landing')
       else if (path === '/custom') setCurrentRoute('custom')
+      else if (path === '/copilot') setCurrentRoute('copilot')
       else setCurrentRoute('landing')
     }
 
@@ -111,12 +114,9 @@ function App() {
     )
   }
 
-  // Copilot hidden as per request
-  /*
   if (currentRoute === 'copilot') {
     return <AIInteriorCopilot onBack={() => setCurrentRoute('landing')} userId={adminUser?.id} userName={adminUser?.name} />
   }
-  */
 
   // Home route removed as per request, always redirect to landing if somehow hit
   if (currentRoute === 'home') {

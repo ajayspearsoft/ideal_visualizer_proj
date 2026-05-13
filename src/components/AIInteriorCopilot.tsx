@@ -1,467 +1,382 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { API_BASE_URL } from '../config'
-import { 
-  Send, 
-  Upload, 
-  Trash2, 
-  RotateCcw, 
-  Download, 
-  Layers, 
-  Sparkles, 
-  MousePointer2, 
-  ChevronRight,
-  MessageSquare,
-  Image as ImageIcon,
-  Check,
+import {
+  Upload,
+  Download,
+  Sparkles,
   X,
   Loader2,
-  Maximize2,
-  History,
-  Palette
+  ArrowLeft,
+  Camera,
+  Image as ImageIcon,
+  ChevronDown,
+  RotateCcw,
+  Wand2
 } from 'lucide-react'
 
-interface Message {
-  role: 'user' | 'ai';
-  content: string;
-  timestamp: number;
-  image?: string;
-  task?: any;
-}
+const ROOM_OPTIONS = [
+  { value: 'bedroom', label: 'Bedroom', emoji: '🛏️' },
+  { value: 'living_room', label: 'Living Room / Hall', emoji: '🛋️' },
+  { value: 'kitchen', label: 'Kitchen', emoji: '🍳' },
+  { value: 'bathroom', label: 'Bathroom', emoji: '🚿' },
+  { value: 'other', label: 'Other (Custom)', emoji: '✨' },
+]
 
-export default function AIInteriorCopilot({ onBack, userId, userName }: { onBack: () => void, userId?: string | number, userName?: string }) {
-  // State
+export default function AIInteriorCopilot({ onBack }: { onBack: () => void, userId?: string | number, userName?: string }) {
   const [roomImage, setRoomImage] = useState<File | null>(null)
   const [roomPreview, setRoomPreview] = useState<string | null>(null)
   const [resultImage, setResultImage] = useState<string | null>(null)
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [roomType, setRoomType] = useState('bedroom')
+  const [customPrompt, setCustomPrompt] = useState('')
+  const [additionalPrompt, setAdditionalPrompt] = useState('')
   const [processing, setProcessing] = useState(false)
-  const [chatOpen, setChatOpen] = useState(true)
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'ai', content: "Hello! I'm your AI Interior Design Copilot. Upload a photo of your room to get started, or just tell me what you'd like to redesign!", timestamp: Date.now() }
-  ])
-  const [input, setInput] = useState('')
-  const [isUploading, setIsUploading] = useState(false)
-  const [activeTask, setActiveTask] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
   const [history, setHistory] = useState<string[]>([])
-  
-  // Refs
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const [statusText, setStatusText] = useState('')
+
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const imageRef = useRef<HTMLImageElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
 
-  // Auto-scroll chat
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [messages])
-
-  // Handle Image Upload
-  const handleUpload = async (file: File) => {
-    setIsUploading(true)
+  const handleImageSelect = (file: File) => {
     setRoomImage(file)
-    const preview = URL.createObjectURL(file)
-    setRoomPreview(preview)
+    setRoomPreview(URL.createObjectURL(file))
     setResultImage(null)
-    
+    setError(null)
+    setStatusText('')
+  }
+
+  const handleGenerate = async () => {
+    if (!roomImage) {
+      setError('Please upload a room image first')
+      return
+    }
+    setProcessing(true)
+    setError(null)
+    setResultImage(null)
+    setStatusText('Uploading image & analyzing room geometry...')
+
     try {
       const formData = new FormData()
-      formData.append('wall_image', file)
-      
-      const response = await fetch(`${API_BASE_URL}/api/upload-room`, {
+      formData.append('room_image', roomImage)
+      formData.append('room_type', roomType)
+      formData.append('additional_prompt', additionalPrompt)
+      if (roomType === 'other') {
+        formData.append('custom_prompt', customPrompt)
+      }
+
+      setStatusText('Running depth estimation & generating floor mask...')
+      await new Promise(r => setTimeout(r, 800))
+      setStatusText('Calling AI engine (gpt-image-1)... This may take 30-60 seconds...')
+
+      const response = await fetch(`${API_BASE_URL}/api/ai-copilot-generate`, {
         method: 'POST',
         body: formData
       })
-      
+
       const data = await response.json()
+
       if (data.success) {
-        setSessionId(data.session_id)
-        setMessages(prev => [...prev, { 
-          role: 'ai', 
-          content: "Room uploaded successfully! I've analyzed your space. You can now ask me to 'Make it a luxury kitchen', 'Change wall to blue', or 'Add more cabinets'.", 
-          timestamp: Date.now() 
-        }])
+        setResultImage(data.result_url)
+        setHistory(prev => [data.result_url, ...prev])
+        setStatusText('✅ AI room generated successfully!')
       } else {
-        throw new Error(data.error)
+        throw new Error(data.error || 'Generation failed')
       }
     } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'ai', content: `Error: ${err.message}`, timestamp: Date.now() }])
-    } finally {
-      setIsUploading(false)
-    }
-  }
-
-  // Handle Chat Submit
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault()
-    if (!input.trim() || processing) return
-
-    const userMessage: Message = { role: 'user', content: input, timestamp: Date.now() }
-    setMessages(prev => [...prev, userMessage])
-    setInput('')
-    setProcessing(true)
-
-    try {
-      // Step 1: Parse the prompt via backend
-      const parseRes = await fetch(`${API_BASE_URL}/api/ai-chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: input, session_id: sessionId })
-      })
-      const parseData = await parseRes.json()
-      
-      if (!parseData.success) throw new Error(parseData.error)
-
-      const task = parseData.task
-      setActiveTask(task)
-      
-      setMessages(prev => [...prev, { role: 'ai', content: parseData.response, timestamp: Date.now(), task: task.action !== 'chat' ? task : null }])
-
-      // Step 2: Route to appropriate engine
-      if (task.action === 'chat') {
-        setProcessing(false)
-        return
-      }
-
-      if (!sessionId || !roomPreview) {
-        setMessages(prev => [...prev, { role: 'ai', content: "Please upload a photo of your room first so I can see what we're working with!", timestamp: Date.now() }])
-        setProcessing(false)
-        return
-      }
-
-      if (task.action === 'redesign' || task.action === 'add' || task.action === 'remove') {
-        // Use Generative AI (DALL-E)
-        const redesignRes = await fetch(`${API_BASE_URL}/api/ai-redesign`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            prompt: input, 
-            image_url: roomPreview,
-            session_id: sessionId,
-            target: task.target
-          })
-        })
-        const redesignData = await redesignRes.json()
-        console.log("[DEBUG] Redesign API Response:", redesignData)
-        
-        if (redesignData.success) {
-          const finalImageUrl = redesignData.resultUrl
-          setResultImage(finalImageUrl)
-          setHistory(prev => [finalImageUrl, ...prev])
-          setMessages(prev => [...prev, { 
-            role: 'ai', 
-            content: redesignData.message || "I've finished your redesign! How does it look?", 
-            timestamp: Date.now(),
-            image: finalImageUrl
-          }])
-        } else {
-          throw new Error(redesignData.error)
-        }
-      } else if (task.action === 'recolor') {
-        // Use Fast OpenCV Engine
-        const color = task.color || '#3b82f6'
-        const formData = new FormData()
-        if (roomImage) formData.append('wall_image', roomImage)
-        formData.append('session_id', sessionId || '')
-        formData.append('texture_url', `https://www.thecolorapi.com/id?hex=${color.replace('#','')}&format=svg`)
-        
-        const processRes = await fetch(`${API_BASE_URL}/api/process-wall`, {
-          method: 'POST',
-          body: formData
-        })
-        const processData = await processRes.json()
-        
-        if (processData.resultUrl) {
-          setResultImage(processData.resultUrl)
-          setHistory(prev => [processData.resultUrl, ...prev])
-          setMessages(prev => [...prev, { 
-            role: 'ai', 
-            content: "I've applied the color change! How does it look?", 
-            timestamp: Date.now(),
-            image: processData.resultUrl
-          }])
-        } else {
-          throw new Error(processData.error)
-        }
-      }
-
-    } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'ai', content: `Oops! Something went wrong: ${err.message}`, timestamp: Date.now() }])
+      setError(err.message || 'Something went wrong')
+      setStatusText('')
     } finally {
       setProcessing(false)
-      setActiveTask(null)
     }
   }
 
   const handleDownload = async () => {
-    const img = resultImage || roomPreview
+    const img = resultImage
     if (!img) return
-    const response = await fetch(img)
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `ai_design_${Date.now()}.png`
-    a.click()
+    try {
+      const response = await fetch(img)
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ai_redesigned_room_${Date.now()}.png`
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      window.open(img, '_blank')
+    }
+  }
+
+  const handleReset = () => {
+    setRoomImage(null)
+    setRoomPreview(null)
+    setResultImage(null)
+    setError(null)
+    setStatusText('')
+    setAdditionalPrompt('')
+    setCustomPrompt('')
   }
 
   return (
-    <div className="h-screen bg-[#0f172a] text-white flex flex-col overflow-hidden font-sans">
+    <div className="min-h-screen bg-[#070b14] text-white font-sans">
       {/* Header */}
-      <header className="h-16 shrink-0 border-b border-white/10 flex items-center justify-between px-6 bg-[#0f172a]/80 backdrop-blur-xl z-20">
+      <header className="sticky top-0 z-50 h-16 border-b border-white/[0.06] flex items-center justify-between px-6 bg-[#070b14]/80 backdrop-blur-2xl">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
-            <X size={20} />
+          <button onClick={onBack} className="p-2 hover:bg-white/10 rounded-xl transition-colors text-slate-400 hover:text-white">
+            <ArrowLeft size={20} />
           </button>
-          <div className="flex flex-col">
-            <h1 className="text-lg font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">AI Interior Copilot</h1>
-            <span className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-medium">AI Inspiration & Concept Explorer</span>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+              <Wand2 size={18} className="text-white" />
+            </div>
+            <div className="flex flex-col">
+              <h1 className="text-base font-bold bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-transparent tracking-tight">AI Interior Copilot</h1>
+              <span className="text-[9px] text-slate-500 uppercase tracking-[0.2em] font-semibold">Geometry-Locked Engine</span>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="hidden md:flex items-center gap-3 px-4 py-1.5 bg-white/5 rounded-full border border-white/10">
-            <div className={`w-2 h-2 rounded-full ${sessionId ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-600'}`}></div>
-            <span className="text-xs font-semibold text-slate-300">{sessionId ? 'AI Models Synced' : 'Awaiting Image'}</span>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <button onClick={handleDownload} disabled={!resultImage && !roomPreview} className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-slate-300 disabled:opacity-30 border border-white/10 shadow-lg active:scale-95">
-              <Download size={18} />
+        <div className="flex items-center gap-3">
+          {resultImage && (
+            <button onClick={handleDownload} className="flex items-center gap-2 px-5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs font-bold uppercase tracking-wider transition-all active:scale-95">
+              <Download size={15} />
+              Download
             </button>
-            <button className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl font-bold text-sm shadow-[0_10px_30px_rgba(37,99,235,0.3)] transition-all active:scale-95 flex items-center gap-2">
-              <Sparkles size={16} />
-              Save Design
-            </button>
-          </div>
+          )}
+          <button onClick={handleReset} className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-slate-400 border border-white/[0.06]">
+            <RotateCcw size={16} />
+          </button>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - Assets & History */}
-        <aside className="hidden lg:flex w-72 shrink-0 border-r border-white/10 flex-col bg-[#0f172a]/50">
-          <div className="p-6 border-b border-white/10">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <History size={14} /> History
-            </h3>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-            {history.map((url, i) => (
-              <div key={i} className="group relative aspect-video rounded-xl overflow-hidden border border-white/10 cursor-pointer hover:border-blue-500/50 transition-all shadow-lg" onClick={() => setResultImage(url)}>
-                <img src={url} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <span className="text-[10px] font-bold uppercase tracking-widest">Restore</span>
+      <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)]">
+        {/* Left Panel — Controls */}
+        <aside className="w-full lg:w-[380px] shrink-0 border-r border-white/[0.06] bg-[#0a0f1a] overflow-y-auto">
+          <div className="p-6 space-y-6">
+
+            {/* Step 1: Upload */}
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                <span className="w-5 h-5 rounded-md bg-violet-500/20 text-violet-400 flex items-center justify-center text-[10px] font-black">1</span>
+                Upload Room Photo
+              </label>
+
+              {!roomPreview ? (
+                <div className="border-2 border-dashed border-white/10 rounded-2xl p-8 flex flex-col items-center gap-4 hover:border-violet-500/30 hover:bg-violet-500/[0.02] transition-all group cursor-pointer"
+                  onClick={() => fileInputRef.current?.click()}>
+                  <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:scale-110 group-hover:bg-violet-500/10 transition-all">
+                    <Upload size={28} className="text-slate-500 group-hover:text-violet-400 transition-colors" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-semibold text-slate-300">Click to upload</p>
+                    <p className="text-xs text-slate-600 mt-1">or use camera below</p>
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click() }}
+                      className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2 transition-all"
+                    >
+                      <Camera size={14} /> Camera
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
+                      className="px-4 py-2 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/20 rounded-xl text-xs font-bold text-violet-300 flex items-center gap-2 transition-all"
+                    >
+                      <ImageIcon size={14} /> Gallery
+                    </button>
+                  </div>
                 </div>
+              ) : (
+                <div className="relative group rounded-2xl overflow-hidden border border-white/10">
+                  <img src={roomPreview} className="w-full aspect-video object-cover" alt="Room" />
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <button onClick={() => { setRoomImage(null); setRoomPreview(null); setResultImage(null) }}
+                      className="px-4 py-2 bg-red-500/80 rounded-xl text-xs font-bold flex items-center gap-2">
+                      <X size={14} /> Remove
+                    </button>
+                  </div>
+                  <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-sm rounded-lg text-[9px] font-bold text-emerald-400 uppercase tracking-widest">
+                    ✓ Uploaded
+                  </div>
+                </div>
+              )}
+
+              <input ref={fileInputRef} type="file" className="hidden" accept="image/*"
+                onChange={(e) => { if (e.target.files?.[0]) handleImageSelect(e.target.files[0]) }} />
+              <input ref={cameraInputRef} type="file" className="hidden" accept="image/*" capture="environment"
+                onChange={(e) => { if (e.target.files?.[0]) handleImageSelect(e.target.files[0]) }} />
+            </div>
+
+            {/* Step 2: Room Type */}
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                <span className="w-5 h-5 rounded-md bg-violet-500/20 text-violet-400 flex items-center justify-center text-[10px] font-black">2</span>
+                Select Room Type
+              </label>
+              <div className="relative">
+                <select
+                  value={roomType}
+                  onChange={(e) => setRoomType(e.target.value)}
+                  className="w-full appearance-none bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3.5 text-sm font-medium text-slate-200 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all cursor-pointer"
+                >
+                  {ROOM_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value} className="bg-[#0a0f1a] text-white">
+                      {opt.emoji}  {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
               </div>
-            ))}
-            {history.length === 0 && (
-              <div className="h-40 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-white/5 rounded-2xl">
-                <ImageIcon size={24} className="mb-2 opacity-20" />
-                <span className="text-xs font-medium">No history yet</span>
+
+              {roomType === 'other' && (
+                <input
+                  type="text"
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  placeholder="e.g. Luxury Spa Room, Home Theater..."
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50 transition-all"
+                />
+              )}
+            </div>
+
+            {/* Step 3: Additional Requirements */}
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                <span className="w-5 h-5 rounded-md bg-violet-500/20 text-violet-400 flex items-center justify-center text-[10px] font-black">3</span>
+                Additional Requirements
+                <span className="text-slate-600 font-normal normal-case tracking-normal">(optional)</span>
+              </label>
+              <textarea
+                value={additionalPrompt}
+                onChange={(e) => setAdditionalPrompt(e.target.value)}
+                placeholder="e.g. Add marble flooring, warm lighting, minimalist furniture..."
+                rows={3}
+                className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50 resize-none transition-all"
+              />
+            </div>
+
+            {/* Generate Button */}
+            <button
+              onClick={handleGenerate}
+              disabled={!roomImage || processing}
+              className="w-full py-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-600 rounded-xl font-bold text-sm uppercase tracking-widest shadow-lg shadow-violet-500/20 disabled:shadow-none transition-all active:scale-[0.98] flex items-center justify-center gap-3"
+            >
+              {processing ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={18} />
+                  Generate AI Design
+                </>
+              )}
+            </button>
+
+            {/* Status */}
+            {statusText && (
+              <div className={`p-3 rounded-xl text-xs font-medium leading-relaxed ${statusText.startsWith('✅') ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-violet-500/10 border border-violet-500/20 text-violet-300'}`}>
+                {statusText}
               </div>
             )}
-          </div>
-          
-          <div className="p-6 border-t border-white/10 bg-[#0f172a]">
-             <div className="p-4 bg-blue-500/10 rounded-2xl border border-blue-500/20">
-                <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Pro Tip</p>
-                <p className="text-xs text-slate-400 leading-relaxed">Try asking for "Luxury marble kitchen" or "Modern bedroom with warm lighting".</p>
-             </div>
+
+            {/* Error */}
+            {error && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium">
+                ⚠️ {error}
+              </div>
+            )}
+
+            {/* History */}
+            {history.length > 0 && (
+              <div className="space-y-3 pt-4 border-t border-white/[0.06]">
+                <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Generation History</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  {history.map((url, i) => (
+                    <div key={i} className="relative aspect-video rounded-xl overflow-hidden border border-white/10 cursor-pointer hover:border-violet-500/40 transition-all group"
+                      onClick={() => setResultImage(url)}>
+                      <img src={url} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={`Result ${i + 1}`} />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <span className="text-[9px] font-bold uppercase tracking-widest">View</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </aside>
 
         {/* Main Viewport */}
-        <main className="flex-1 relative flex flex-col bg-[#020617]">
-          <div className="flex-1 relative p-6 flex items-center justify-center overflow-hidden">
-             {!roomPreview ? (
-               <div className="w-full max-w-3xl aspect-[16/10] border-4 border-dashed border-white/10 rounded-[3rem] flex flex-col items-center justify-center group hover:border-blue-500/50 hover:bg-blue-500/5 transition-all duration-500 shadow-2xl relative overflow-hidden p-8">
-                 {/* Decorative background sparks */}
-                 <div className="absolute top-1/4 left-1/4 w-32 h-32 bg-blue-500/10 blur-[80px] group-hover:bg-blue-500/20 transition-all"></div>
-                 <div className="absolute bottom-1/4 right-1/4 w-32 h-32 bg-emerald-500/10 blur-[80px] group-hover:bg-emerald-500/20 transition-all"></div>
-                 
-                 <div className="w-24 h-24 bg-white/5 rounded-3xl flex items-center justify-center mb-6 border border-white/10 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-2xl">
-                    {isUploading ? <Loader2 className="animate-spin text-blue-400" size={40} /> : <Upload className="text-slate-400 group-hover:text-blue-400 transition-colors" size={40} />}
-                 </div>
-                 <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Upload Your Space</h2>
-                 <p className="text-slate-400 max-w-sm text-center leading-relaxed mb-10">Take a live photo or upload an image to begin your AI-powered redesign journey.</p>
-                 
-                 <div className="flex flex-col sm:flex-row gap-4 w-full max-w-xs sm:max-w-none sm:justify-center z-10">
-                   <button 
-                    onClick={() => {
-                      const input = document.createElement('input');
-                      input.type = 'file';
-                      input.accept = 'image/*';
-                      input.setAttribute('capture', 'environment');
-                      input.onchange = (e) => {
-                        const file = (e.target as HTMLInputElement).files?.[0];
-                        if (file) handleUpload(file);
-                      };
-                      input.click();
-                    }}
-                    className="flex-1 sm:flex-none px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl font-bold text-white shadow-xl hover:shadow-blue-500/20 transition-all active:scale-95 flex items-center justify-center gap-3"
-                   >
-                     <div className="w-6 h-6 bg-white/10 rounded-lg flex items-center justify-center">
-                        <Upload size={14} />
-                     </div>
-                     Take Photo
-                   </button>
-                   <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex-1 sm:flex-none px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl font-bold text-slate-200 transition-all active:scale-95 flex items-center justify-center gap-3"
-                   >
-                     <div className="w-6 h-6 bg-white/10 rounded-lg flex items-center justify-center">
-                        <ImageIcon size={14} />
-                     </div>
-                     Browse Gallery
-                   </button>
-                 </div>
-                 
-                 <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => {
-                   if (e.target.files?.[0]) handleUpload(e.target.files[0])
-                 }} />
-               </div>
-             ) : (
-               <div className="relative w-full h-full flex items-center justify-center animate-in fade-in zoom-in-95 duration-700">
-                  <div className="relative max-w-full max-h-full rounded-2xl overflow-hidden shadow-[0_30px_100px_rgba(0,0,0,0.8)] border border-white/10 group">
-                    <img 
-                      ref={imageRef}
-                      src={resultImage || roomPreview} 
-                      className={`w-full h-full object-contain transition-all duration-500 ${processing ? 'brightness-50 blur-sm scale-105' : 'brightness-100 blur-0 scale-100'}`}
-                      alt="Interior view"
-                    />
-                    
-                    {processing && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
-                         <div className="w-20 h-20 relative flex items-center justify-center">
-                            <div className="absolute inset-0 border-4 border-blue-500/30 rounded-full"></div>
-                            <div className="absolute inset-0 border-4 border-t-blue-500 rounded-full animate-spin"></div>
-                            <Sparkles className="text-blue-400 animate-pulse" size={32} />
-                         </div>
-                         <div className="mt-6 text-center">
-                            <h3 className="text-xl font-bold text-white mb-1">AI Copilot at work...</h3>
-                            <p className="text-sm text-slate-400 px-10">
-                              {activeTask?.action === 'redesign' ? 'Generating creative concept inspiration...' : 'Applying precise modifications to your space'}
-                            </p>
-                         </div>
-                      </div>
-                    )}
-                    
-                    {/* Floating Tools Over Image */}
-                    <div className="absolute top-6 right-6 flex flex-col gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0">
-                       <button onClick={() => setResultImage(null)} className="w-10 h-10 bg-white/10 backdrop-blur-xl hover:bg-white/20 rounded-full flex items-center justify-center border border-white/10 shadow-xl transition-all" title="Reset View">
-                          <RotateCcw size={18} />
-                       </button>
-                       <button className="w-10 h-10 bg-white/10 backdrop-blur-xl hover:bg-white/20 rounded-full flex items-center justify-center border border-white/10 shadow-xl transition-all" title="Full Screen">
-                          <Maximize2 size={18} />
-                       </button>
-                    </div>
-
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-xl px-4 py-1.5 rounded-full border border-white/10 text-[10px] font-bold text-slate-400 uppercase tracking-widest shadow-2xl">
-                       {resultImage ? 'AI Concept Preview' : 'Original Photo'}
-                    </div>
-                  </div>
-               </div>
-             )}
-          </div>
-        </main>
-
-        {/* Right Sidebar - Chat Interface */}
-        <aside className={`${chatOpen ? 'w-96' : 'w-0'} shrink-0 border-l border-white/10 flex flex-col transition-all duration-500 bg-[#0f172a] shadow-[-20px_0_50px_rgba(0,0,0,0.3)] z-10`}>
-           <div className="p-6 border-b border-white/10 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
-                    <MessageSquare size={20} className="text-white" />
-                 </div>
-                 <div>
-                    <h3 className="text-sm font-bold text-white tracking-tight">AI Assistant</h3>
-                    <div className="flex items-center gap-1.5">
-                       <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Online & Thinking</span>
-                    </div>
-                 </div>
+        <main className="flex-1 relative flex items-center justify-center bg-[#050810] p-6 overflow-hidden">
+          {!roomPreview && !resultImage ? (
+            <div className="flex flex-col items-center justify-center text-center max-w-md">
+              <div className="w-24 h-24 rounded-3xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center mb-6">
+                <Wand2 size={40} className="text-slate-700" />
               </div>
-           </div>
-
-           <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-              {messages.map((m, i) => (
-                <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-                  <div className={`max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed shadow-lg ${m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/5 border border-white/10 text-slate-200 rounded-tl-none'}`}>
-                     {m.content}
-                     {m.task && (
-                       <div className="mt-3 p-2 bg-black/20 rounded-lg border border-white/5 flex items-center gap-2">
-                          <div className="p-1.5 bg-blue-500/20 rounded-md">
-                             {m.task.action === 'recolor' ? <Palette size={14} className="text-blue-400" /> : <Sparkles size={14} className="text-emerald-400" />}
-                          </div>
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{m.task.action}: {m.task.target}</span>
-                       </div>
-                     )}
-                  </div>
-                  {m.image && (
-                    <div className="mt-3 w-full max-w-[85%] aspect-video rounded-xl overflow-hidden border border-white/10 shadow-2xl animate-in zoom-in-95 duration-500">
-                       <img src={m.image} className="w-full h-full object-cover" />
+              <h2 className="text-2xl font-bold text-slate-300 mb-3">Upload a Room Photo</h2>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                Upload or capture a photo of your room. The AI will preserve the exact room geometry while adding luxury interiors and furniture.
+              </p>
+            </div>
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-6">
+              {/* Side by Side: Original + Result */}
+              <div className={`flex flex-col ${resultImage ? 'lg:flex-row' : ''} gap-6 w-full max-w-6xl items-center justify-center`}>
+                {/* Original */}
+                {roomPreview && (
+                  <div className="flex-1 max-w-2xl">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3 text-center">Original Room</div>
+                    <div className="rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
+                      <img src={roomPreview} className="w-full object-contain max-h-[60vh]" alt="Original" />
                     </div>
-                  )}
-                  <span className="text-[9px] font-bold text-slate-600 mt-2 uppercase tracking-widest">{m.role === 'ai' ? 'Copilot' : 'You'} • {new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                </div>
-              ))}
-              {processing && (
-                <div className="flex flex-col items-start animate-in fade-in duration-300">
-                   <div className="bg-white/5 border border-white/10 p-4 rounded-2xl flex gap-2">
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce"></div>
-                   </div>
+                  </div>
+                )}
+
+                {/* Result */}
+                {resultImage && (
+                  <div className="flex-1 max-w-2xl">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400 mb-3 text-center">AI Redesigned Room</div>
+                    <div className="rounded-2xl overflow-hidden border border-emerald-500/20 shadow-2xl shadow-emerald-500/5 relative group">
+                      <img src={resultImage} className="w-full object-contain max-h-[60vh]" alt="AI Result" />
+                      <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={handleDownload} className="px-3 py-1.5 bg-black/60 backdrop-blur-sm rounded-lg text-[10px] font-bold text-white flex items-center gap-2 border border-white/10">
+                          <Download size={12} /> Save
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Processing overlay */}
+              {processing && roomPreview && (
+                <div className="absolute inset-0 bg-[#050810]/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+                  <div className="w-20 h-20 relative flex items-center justify-center mb-6">
+                    <div className="absolute inset-0 border-4 border-violet-500/20 rounded-full"></div>
+                    <div className="absolute inset-0 border-4 border-t-violet-500 rounded-full animate-spin"></div>
+                    <Sparkles className="text-violet-400 animate-pulse" size={32} />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-2">AI Engine Processing</h3>
+                  <p className="text-sm text-slate-400 max-w-sm text-center">{statusText || 'Generating your luxury interior...'}</p>
+                  <div className="mt-6 flex gap-1">
+                    {[0, 1, 2].map(i => (
+                      <div key={i} className="w-2 h-2 bg-violet-500 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }}></div>
+                    ))}
+                  </div>
                 </div>
               )}
-           </div>
-
-           <div className="p-6 border-t border-white/10 bg-[#0f172a]/80 backdrop-blur-xl shrink-0">
-              <form onSubmit={handleSubmit} className="relative">
-                 <input 
-                   type="text" 
-                   value={input}
-                   onChange={(e) => setInput(e.target.value)}
-                   disabled={processing}
-                   placeholder={roomPreview ? "Describe your dream room..." : "Upload a photo to begin chat..."}
-                   className="w-full pl-6 pr-14 py-4 bg-white/5 border border-white/10 rounded-2xl text-sm focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-slate-600"
-                 />
-                 <button 
-                  type="submit" 
-                  disabled={!input.trim() || processing}
-                  className="absolute right-2 top-2 w-10 h-10 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-xl flex items-center justify-center transition-all shadow-lg active:scale-95"
-                 >
-                    <Send size={18} />
-                 </button>
-              </form>
-              <div className="mt-4 flex flex-wrap gap-2">
-                 {['Luxury Modern', 'Minimalist', 'Cozy Warm', 'Office Style'].map(suggestion => (
-                   <button 
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    disabled={!roomPreview || processing}
-                    className="px-3 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-[10px] font-bold text-slate-400 hover:text-white transition-all disabled:opacity-20"
-                   >
-                     {suggestion}
-                   </button>
-                 ))}
-              </div>
-           </div>
-        </aside>
+            </div>
+          )}
+        </main>
       </div>
 
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 5px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.2);
+        select option {
+          background: #0a0f1a;
+          color: #e2e8f0;
+          padding: 8px;
         }
       `}</style>
     </div>

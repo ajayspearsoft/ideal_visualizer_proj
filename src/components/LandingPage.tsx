@@ -1,5 +1,5 @@
 import React, { useRef } from 'react'
-import { Sparkles, Home, Upload, Palette, ArrowRight, Camera, Image as ImageIcon, CheckCircle2, Shield, Layers, MousePointer2 } from 'lucide-react'
+import { Sparkles, Home, Upload, Palette, ArrowRight, Camera, Image as ImageIcon, CheckCircle2, Shield, Layers, MousePointer2, Wand2 } from 'lucide-react'
 
 interface LandingPageProps {
   onNavigate: (route: string, data?: any) => void;
@@ -109,6 +109,16 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
                 />
               </button>
             </div>
+
+            {/* AI Copilot Button */}
+            <button
+              onClick={() => onNavigate('copilot')}
+              className="mt-4 flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white text-xs font-bold uppercase tracking-widest rounded-sm shadow-lg shadow-violet-500/20 transition-all active:scale-95 group"
+            >
+              <Wand2 size={18} className="group-hover:rotate-12 transition-transform" />
+              AI Copilot Designer
+              <ArrowRight size={16} className="opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+            </button>
           </div>
 
           <div className="relative group">

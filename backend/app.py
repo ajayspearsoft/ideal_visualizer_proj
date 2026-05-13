@@ -143,6 +143,11 @@ r2_client = boto3.client(
     region_name='auto'
 )
 
+# Leonardo.ai Configuration
+LEONARDO_API_KEY = os.getenv("LEONARDO_API_KEY")
+LEONARDO_API_URL = "https://cloud.leonardo.ai/api/rest/v1"
+LEONARDO_MODEL_ID = "1e60896f-3c26-4296-8ecc-53e2afecc132" # Leonardo Diffusion XL (Excellent for Inpainting)
+
 def upload_to_r2(file_data, object_name, content_type='image/png'):
     try:
         if not R2_ACCOUNT_ID or not R2_ACCESS_KEY_ID:
@@ -2853,7 +2858,7 @@ def ai_chat():
         """
 
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
@@ -3029,6 +3034,295 @@ def login():
     
     print(f"[ERROR] [LOGIN DEBUG] Password MISMATCH for: {identifier}")
     return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+# ============================================================
+# AI COPILOT — GEOMETRY LOCKED INTERIOR REDESIGN ENGINE
+# Replicates the Colab notebook exactly
+# ============================================================
+ROOM_PROMPTS = {
+    "bedroom": [
+        """
+        ultra luxury modern hotel-style bedroom. 
+        SCENE ANALYSIS: Detect existing wall features like arches or niches and place a luxury upholstered king-size bed and stylish box-type wardrobes around them. 
+        INSTRUCTIONS: Add premium glossy wooden finishes, warm LED lighting, and designer pendant lights. 
+        STRICT GEOMETRY LOCK: Preserve ceiling lines, wall corners, and window positions exactly. DO NOT cover fixed architectural objects.
+        """,
+        """
+        contemporary luxury bedroom with modern wardrobes and walnut finish. 
+        SCENE ANALYSIS: Respect room architecture. Place king-size bed naturally on the floor. 
+        INSTRUCTIONS: Use ivory and brown luxury colors, hidden ambient lighting, and realistic bedding. 
+        STRICT GEOMETRY LOCK: Maintain exact room perspective.
+        """
+    ],
+    "living_room": [
+        """
+        ultra luxury modern living room. 
+        SCENE ANALYSIS: Identify the central wall. PLACE A LARGE CINEMATIC FLAT-SCREEN TV on the wall. Align a luxury L-shaped sofa perfectly on the floor. 
+        INSTRUCTIONS: Enhance existing wall niches/arches with decor. Use marble textures, warm LED lighting, and indoor plants. 
+        STRICT GEOMETRY LOCK: Keep all structural lines, arches, and windows intact.
+        """
+    ],
+    "kitchen": [
+        """
+        ultra modern modular kitchen with premium matte cabinets and marble countertops. 
+        SCENE ANALYSIS: Follow the existing wall lines for cabinet placement. 
+        INSTRUCTIONS: Add a sophisticated kitchen island and warm under-cabinet lighting. 
+        STRICT GEOMETRY LOCK: Do not change room structure.
+        """
+    ],
+    "bathroom": [
+        """
+        ultra luxury hotel-style bathroom with Italian marble. 
+        SCENE ANALYSIS: Place a floating vanity and large backlit mirror. 
+        INSTRUCTIONS: Add golden fittings and ambient LED lighting. 
+        STRICT GEOMETRY LOCK: Preserve mirror and window positions.
+        """
+    ]
+}
+
+
+# ============================================================
+# LEONARDO.AI INTEGRATION (CANVAS INPAINTING)
+# ============================================================
+
+
+def leonardo_upload_canvas_images(init_bytes, mask_bytes):
+    """Uploads both init and mask images to Leonardo for Canvas inpainting."""
+    try:
+        # 1. Get presigned URLs for BOTH
+        payload = {
+            "initExtension": "png",
+            "maskExtension": "png"
+        }
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": f"Bearer {LEONARDO_API_KEY}"
+        }
+        
+        response = requests.post(f"{LEONARDO_API_URL}/canvas-init-image", json=payload, headers=headers)
+        if not response.ok:
+            print(f"[LEONARDO UPLOAD ERROR] {response.text}")
+            return None, None
+            
+        data = response.json().get("uploadCanvasInitImage", {})
+        
+        # Extract Init details
+        init_id = data.get("initImageId")
+        init_url = data.get("initUrl")
+        init_fields = json.loads(data.get("initFields", "{}"))
+        
+        # Extract Mask details
+        mask_id = data.get("masksImageId")
+        mask_url = data.get("masksUrl")
+        mask_fields = json.loads(data.get("masksFields", "{}"))
+        
+        if not init_id or not mask_id:
+            return None, None
+            
+        # 2. Upload Init Image
+        # S3 requires the file to be the LAST field in the form
+        files = {'file': ('init.png', init_bytes, 'image/png')}
+        requests.post(init_url, data=init_fields, files=files)
+        
+        # 3. Upload Mask Image
+        files_mask = {'file': ('mask.png', mask_bytes, 'image/png')}
+        requests.post(mask_url, data=mask_fields, files=files_mask)
+        
+        return init_id, mask_id
+    except Exception as e:
+        print(f"[LEONARDO UPLOAD EXCEPTION] {e}")
+        return None, None
+
+def leonardo_generate_inpaint(prompt, init_id, mask_id):
+    """Triggers a Leonardo Canvas Inpainting generation."""
+    try:
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": f"Bearer {LEONARDO_API_KEY}"
+        }
+        
+        payload = {
+            "prompt": prompt,
+            "modelId": LEONARDO_MODEL_ID,
+            "num_images": 1,
+            "width": 1024,
+            "height": 768,
+            "init_strength": 0.2, # Very High change (0.8 inpaint strength)
+            "guidance_scale": 15, # Maximum guidance to follow prompt strictly
+            "canvasRequest": True,
+            "canvasRequestType": "INPAINT",
+            "canvasInitId": init_id,
+            "canvasMaskId": mask_id
+        }
+        
+        response = requests.post(f"{LEONARDO_API_URL}/generations", json=payload, headers=headers)
+        if not response.ok:
+            print(f"[LEONARDO GEN ERROR] {response.text}")
+            return None
+            
+        generation_id = response.json().get("sdGenerationJob", {}).get("generationId")
+        return generation_id
+    except Exception as e:
+        print(f"[LEONARDO GEN EXCEPTION] {e}")
+        return None
+
+def leonardo_wait_for_result(generation_id):
+    """Polls Leonardo for the generation result."""
+    try:
+        headers = {
+            "accept": "application/json",
+            "authorization": f"Bearer {LEONARDO_API_KEY}"
+        }
+        
+        for _ in range(30): # Poll for up to 60 seconds
+            response = requests.get(f"{LEONARDO_API_URL}/generations/{generation_id}", headers=headers)
+            if response.ok:
+                data = response.json().get("generations_by_pk", {})
+                status = data.get("status")
+                
+                if status == "COMPLETE":
+                    images = data.get("generated_images", [])
+                    if images:
+                        return images[0].get("url")
+                elif status == "FAILED":
+                    return None
+            
+            time.sleep(2)
+        return None
+    except Exception as e:
+        print(f"[LEONARDO POLL EXCEPTION] {e}")
+        return None
+
+
+@app.route('/api/ai-copilot-generate', methods=['POST'])
+def ai_copilot_generate_leonardo():
+    """
+    GEOMETRY LOCKED AI INTERIOR ENGINE (POWERED BY LEONARDO.AI)
+    """
+    import random
+    import io
+
+    if not LEONARDO_API_KEY:
+        return jsonify({'success': False, 'error': 'Leonardo API key not configured'}), 500
+
+    try:
+        if 'room_image' not in request.files:
+            return jsonify({'success': False, 'error': 'No room image uploaded'}), 400
+
+        room_file = request.files['room_image']
+        room_type = request.form.get('room_type', 'bedroom')
+        additional_prompt = request.form.get('additional_prompt', '')
+        custom_prompt = request.form.get('custom_prompt', '')
+
+        print(f"\n[LEONARDO COPILOT] Starting generation...", flush=True)
+
+        # 1. Load & Resize Image (Optimized for Leonardo)
+        image_bytes = room_file.read()
+        image_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        target_w, target_h = 1024, 768 # Standard Leonardo Canvas ratio
+        image_pil = image_pil.resize((target_w, target_h))
+
+        # 2. Intelligent Room Mask (Trapezoid to protect side features)
+        # Protects the sides (arches/windows) and top (ceiling)
+        floor_mask = np.zeros((target_h, target_w), dtype=np.uint8)
+        mask_top = int(target_h * 0.20) # Protect top 20%
+        
+        # Create a trapezoid that is narrower at top, wider at bottom
+        # to focus on floor/center-wall while protecting sides.
+        pts = np.array([[
+            (int(target_w * 0.10), mask_top), # Top-Left
+            (int(target_w * 0.90), mask_top), # Top-Right
+            (target_w, target_h),            # Bottom-Right
+            (0, target_h)                    # Bottom-Left
+        ]], dtype=np.int32)
+        
+        cv2.fillPoly(floor_mask, pts, 255)
+        
+        # Smooth and feather
+        floor_mask = cv2.GaussianBlur(floor_mask, (31, 31), 0)
+
+        # 3. Save to memory
+        input_buffer = io.BytesIO()
+        image_pil.save(input_buffer, format="PNG")
+        input_bytes = input_buffer.getvalue()
+
+        mask_pil = Image.fromarray(floor_mask.astype(np.uint8))
+        mask_buffer = io.BytesIO()
+        mask_pil.save(mask_buffer, format="PNG")
+        mask_bytes = mask_buffer.getvalue()
+
+        # 4. Upload to Leonardo
+        print("[LEONARDO COPILOT] Uploading images to Canvas...", flush=True)
+        init_id, mask_id = leonardo_upload_canvas_images(input_bytes, mask_bytes)
+        
+        if not init_id or not mask_id:
+            return jsonify({'success': False, 'error': 'Failed to upload images to Leonardo Canvas'}), 500
+
+        # 5. Build Final Prompt (Exact same as Colab)
+        if room_type == "other":
+            selected_prompt = custom_prompt if custom_prompt else "luxury modern interior"
+        else:
+            prompts = ROOM_PROMPTS.get(room_type, ROOM_PROMPTS["bedroom"])
+            selected_prompt = random.choice(prompts)
+
+        final_prompt = f"""
+Transform this EXACT SAME room into:
+{selected_prompt}
+
+Additional user requirements:
+{additional_prompt}
+
+VERY IMPORTANT:
+DO NOT CHANGE WALLS.
+DO NOT CHANGE WINDOWS.
+DO NOT CHANGE WINDOW POSITION.
+DO NOT CHANGE ROOM SIZE.
+DO NOT CHANGE ROOM GEOMETRY.
+DO NOT CHANGE FLOOR PERSPECTIVE.
+DO NOT CHANGE CEILING.
+DO NOT CHANGE CAMERA ANGLE.
+DO NOT CHANGE STRUCTURE.
+DO NOT GENERATE NEW ROOM.
+DO NOT MODIFY ARCHITECTURE.
+
+ONLY:
+Add furniture.
+Add realistic interiors.
+Add decor items.
+Add lighting.
+Add realistic materials.
+
+Preserve exact room measurements.
+Preserve exact geometry.
+Preserve exact perspective.
+"""
+
+        # 6. Trigger Generation
+        print("[LEONARDO COPILOT] Triggering generation...", flush=True)
+        gen_id = leonardo_generate_inpaint(final_prompt, init_id, mask_id)
+        if not gen_id:
+            return jsonify({'success': False, 'error': 'Failed to trigger Leonardo generation'}), 500
+
+        # 7. Poll for Result
+        print("[LEONARDO COPILOT] Polling for result...", flush=True)
+        result_url = leonardo_wait_for_result(gen_id)
+        
+        if not result_url:
+            return jsonify({'success': False, 'error': 'Leonardo generation timed out or failed'}), 500
+
+        return jsonify({
+            'success': True,
+            'result_url': result_url,
+            'message': 'AI room generated successfully via Leonardo.ai',
+            'room_type': room_type
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     print("\n[DEBUG] Starting Flask App...", flush=True)
