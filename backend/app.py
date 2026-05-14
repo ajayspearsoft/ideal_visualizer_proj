@@ -66,6 +66,11 @@ import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
 import traceback
 from openai import OpenAI
+from core.segmentation import SegmentationEngine
+from core.geometry import GeometryEngine
+from core.generation import GenerationEngine
+from core.depth import DepthEngine
+
 try:
     from docx import Document
 except ImportError:
@@ -206,10 +211,17 @@ ocr_reader = None
 def init_ocr():
     global ocr_reader
     print("[DEBUG] Initializing EasyOCR...", flush=True)
-    import easyocr
-    import torch
-    ocr_reader = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
-    print("[DEBUG] EasyOCR Ready", flush=True)
+    try:
+        import easyocr
+        import torch
+        ocr_reader = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
+        print("[DEBUG] EasyOCR Ready", flush=True)
+    except ImportError:
+        print("[WARNING] EasyOCR not installed. OCR features will be disabled.", flush=True)
+        ocr_reader = None
+    except Exception as e:
+        print(f"[WARNING] EasyOCR failed to initialize: {e}", flush=True)
+        ocr_reader = None
 
 # ==========================================
 # CONFIGURATION
@@ -253,6 +265,13 @@ depth_transform = None
 rembg_session = None
 models_ready = False
 model_loading_error = None
+
+# Production Engines
+segmentation_engine = None
+geometry_engine = None
+generation_engine = None
+depth_engine = None
+
 
 # Cache for performance
 wall_cache = {}
@@ -355,6 +374,17 @@ def load_models():
             print("[DEBUG] Rembg Loaded Successfully", flush=True)
         except Exception as e:
             print(f"[WARNING] Rembg loading failed: {e}", flush=True)
+
+        global segmentation_engine, geometry_engine, generation_engine, depth_engine
+        segmentation_engine = SegmentationEngine(
+            yolov11_model=yolo_model,
+            scene_model=scene_model,
+            scene_processor=scene_processor
+        )
+        geometry_engine = GeometryEngine(model_path="models/mlsd_tiny_512_fp32.onnx")
+        depth_engine = DepthEngine(model=depth_model, transform=depth_transform)
+        generation_engine = GenerationEngine(api_key=LEONARDO_API_KEY, model_id=LEONARDO_MODEL_ID)
+        print("[DEBUG] Production Engines Initialized", flush=True)
 
         # 6. GLOBAL CPU OPTIMIZATION
         torch.set_num_threads(min(os.cpu_count(), 4)) # Optimize for multi-tenant CPU environments
@@ -1783,40 +1813,6 @@ def detect_texture(image):
     t_thresh = np.percentile(texture_density, 88)
     return (texture_density > t_thresh).astype(np.uint8)
 
-@time_it
-def estimate_depth(image):
-    """Generate a relative depth map for geometric guidance."""
-    global depth_model, depth_transform
-    if depth_model is None: return None
-    
-    try:
-        import torch
-        device = next(depth_model.parameters()).device
-        
-        # Preprocess at a reduced resolution for speed (SaaS efficiency)
-        h, w = image.shape[:2]
-        img_input = cv2.resize(image, (384, 384)) # MiDaS small optimal size
-        
-        input_batch = depth_transform(img_input).to(device)
-        
-        # Inference
-        with torch.no_grad():
-            prediction = depth_model(input_batch)
-            prediction = torch.nn.functional.interpolate(
-                prediction.unsqueeze(1),
-                size=(h, w),
-                mode="bicubic",
-                align_corners=False,
-            ).squeeze()
-        
-        output = prediction.cpu().numpy()
-        # Normalize to 0-1 (Near is 0, Far is 1)
-        output = (output - output.min()) / (output.max() - output.min() + 1e-6)
-        return output
-    except Exception as e:
-        print(f"[ERROR] Depth Estimation failed: {e}")
-        return None
-
 def detect_vanishing_points(image):
     """
     Detect architectural vanishing points using Hough Line Transform.
@@ -2625,7 +2621,7 @@ def process_wall():
                 # Run AI pipeline
                 future_walls = executor.submit(detect_walls, image_ai)
                 future_objects = executor.submit(detect_objects, image_ai, use_fast_mode=use_fast_mode)
-                future_depth = executor.submit(estimate_depth, image_ai)
+                future_depth = executor.submit(lambda: None)
                 future_alpha = executor.submit(extract_foreground_alpha, image_ai)
                 
                 wall_mask, structural, _ = future_walls.result()
@@ -2925,11 +2921,18 @@ def ai_redesign():
         
         print(f"[AI REDESIGN] Generating for: {user_prompt}", flush=True)
         
+        # Mandatory Backend Preservation Layer
+        preservation = (
+            "STRICTLY PRESERVE original room measurements, dimensions, and geometry. "
+            "Keep original wall, door, and window positions exactly. Do not modify structure or camera perspective. "
+            "ONLY transform interiors, furniture, and textures."
+        )
+
         # Use DALL-E 3 for high-quality redesign
         full_prompt = (
             f"A professional high-fidelity interior design photo of this room redesigned as a {user_prompt}. "
-            f"Preserve the basic architectural layout. Transform all materials, furniture, and lighting "
-            f"into a luxury {user_prompt} aesthetic. Ultra-realistic, 8k, architectural digest style."
+            f"{preservation} Transform all materials and decor into a luxury {user_prompt} aesthetic. "
+            f"Ultra-realistic, 8k, architectural digest style."
         )
         
         response = client.images.generate(
@@ -3041,18 +3044,11 @@ def login():
 # ============================================================
 ROOM_PROMPTS = {
     "bedroom": [
-        """
-        ultra luxury modern hotel-style bedroom. 
-        SCENE ANALYSIS: Detect existing wall features like arches or niches and place a luxury upholstered king-size bed and stylish box-type wardrobes around them. 
-        INSTRUCTIONS: Add premium glossy wooden finishes, warm LED lighting, and designer pendant lights. 
-        STRICT GEOMETRY LOCK: Preserve ceiling lines, wall corners, and window positions exactly. DO NOT cover fixed architectural objects.
-        """,
-        """
-        contemporary luxury bedroom with modern wardrobes and walnut finish. 
-        SCENE ANALYSIS: Respect room architecture. Place king-size bed naturally on the floor. 
-        INSTRUCTIONS: Use ivory and brown luxury colors, hidden ambient lighting, and realistic bedding. 
-        STRICT GEOMETRY LOCK: Maintain exact room perspective.
-        """
+        "Modern blue and white master bedroom, keep exact same room measurements and geometry, edit only existing room, stylish king size bed, elegant blue and white wardrobes with soft LED lights, modern TV unit and lowers, premium curtains, dressing table with mirror, wall mounted AC, false ceiling lights, clean luxury interior, realistic lighting, modern aesthetic, ultra realistic render",
+        "Luxury bedroom makeover in blue and white theme, preserve original room size and structure, modern bed design, full wall wardrobes, sleek lowers and storage cabinets, soft curtains, dressing table with round mirror, split AC, warm LED ceiling lights, stylish and premium interior design, realistic architecture visualization",
+        "Elegant modern bedroom interior, do not change room dimensions, edit same room only, blue and white color combination, cozy king bed, glossy wardrobes with hidden lights, stylish lowers, beautiful curtains, compact dressing table and mirror, AC unit, minimalist luxury bedroom, cinematic lighting, photorealistic render",
+        "Contemporary master bedroom design in navy blue and white colors, maintain same room measurements and perspective, premium bed with cushions, modern wardrobes, TV lowers and cabinets, soft flowing curtains, dressing table with LED mirror, wall AC, elegant ceiling lighting, bright and classy luxury interior",
+        "Stylish blue and white bedroom renovation, preserve exact room geometry and wall positions, modern upholstered bed, sleek custom wardrobes, matching lowers, elegant curtains, dressing table and mirror setup, split AC, warm ambient lighting, modern luxury bedroom, ultra detailed realistic interior render"
     ],
     "living_room": [
         """
@@ -3217,107 +3213,113 @@ def ai_copilot_generate_leonardo():
         custom_prompt = request.form.get('custom_prompt', '')
 
         print(f"\n[LEONARDO COPILOT] Starting generation...", flush=True)
-
-        # 1. Load & Resize Image (Optimized for Leonardo)
+        # 1. Image Normalization
         image_bytes = room_file.read()
-        image_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        target_w, target_h = 1024, 768 # Standard Leonardo Canvas ratio
-        image_pil = image_pil.resize((target_w, target_h))
-
-        # 2. Intelligent Room Mask (Trapezoid to protect side features)
-        # Protects the sides (arches/windows) and top (ceiling)
-        floor_mask = np.zeros((target_h, target_w), dtype=np.uint8)
-        mask_top = int(target_h * 0.20) # Protect top 20%
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        original_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # Create a trapezoid that is narrower at top, wider at bottom
-        # to focus on floor/center-wall while protecting sides.
-        pts = np.array([[
-            (int(target_w * 0.10), mask_top), # Top-Left
-            (int(target_w * 0.90), mask_top), # Top-Right
-            (target_w, target_h),            # Bottom-Right
-            (0, target_h)                    # Bottom-Left
-        ]], dtype=np.int32)
-        
-        cv2.fillPoly(floor_mask, pts, 255)
-        
-        # Smooth and feather
-        floor_mask = cv2.GaussianBlur(floor_mask, (31, 31), 0)
+        if original_cv is None:
+            return jsonify({'success': False, 'error': 'Invalid image format'}), 400
 
-        # 3. Save to memory
-        input_buffer = io.BytesIO()
-        image_pil.save(input_buffer, format="PNG")
-        input_bytes = input_buffer.getvalue()
+        # 2. GEOMETRY LOCK (Canny Skeleton)
+        skeleton = None
+        if geometry_engine:
+            print("[LEONARDO COPILOT] Extracting Architectural Skeleton...", flush=True)
+            try:
+                skeleton = geometry_engine.extract_architectural_skeleton(original_cv)
+                # Save Canny debug overlay
+                edge_overlay = geometry_engine.create_edge_overlay(original_cv, skeleton)
+                edge_path = os.path.join(app.config['UPLOAD_FOLDER'], f"debug_canny_{int(time.time())}.png")
+                cv2.imwrite(edge_path, edge_overlay)
+                print(f"[LEONARDO COPILOT] Geometry Skeleton Ready. Debug: {edge_path}", flush=True)
+            except Exception as e:
+                print(f"[WARNING] Canny Edge Extraction failed: {e}", flush=True)
 
-        mask_pil = Image.fromarray(floor_mask.astype(np.uint8))
-        mask_buffer = io.BytesIO()
-        mask_pil.save(mask_buffer, format="PNG")
-        mask_bytes = mask_buffer.getvalue()
+        # 3. SEMANTIC MASKING (Production Engine)
+        masks = None
+        if segmentation_engine:
+            print("[LEONARDO COPILOT] Running Semantic Segmentation...", flush=True)
+            try:
+                masks = segmentation_engine.generate_masks(original_cv, room_type=room_type, skeleton=skeleton)
+                # Save debug mask for verification
+                debug_path = os.path.join(app.config['UPLOAD_FOLDER'], f"debug_mask_{int(time.time())}.png")
+                cv2.imwrite(debug_path, masks['debug'])
+                print(f"[LEONARDO COPILOT] Semantic Masks Ready. Debug: {debug_path}", flush=True)
+            except Exception as e:
+                print(f"[WARNING] Semantic Segmentation failed: {e}. Falling back to trapezoid.", flush=True)
 
-        # 4. Upload to Leonardo
-        print("[LEONARDO COPILOT] Uploading images to Canvas...", flush=True)
-        init_id, mask_id = leonardo_upload_canvas_images(input_bytes, mask_bytes)
-        
-        if not init_id or not mask_id:
-            return jsonify({'success': False, 'error': 'Failed to upload images to Leonardo Canvas'}), 500
+        # 3. DEPTH ESTIMATION (Spatial Conditioning)
+        depth_data = None
+        if depth_engine:
+            print("[LEONARDO COPILOT] Running Depth Estimation...", flush=True)
+            try:
+                depth_map = depth_engine.generate_depth_map(original_cv)
+                depth_data = depth_engine.analyze_spatial_zones(depth_map)
+                
+                # Save depth debug overlay
+                depth_overlay = depth_engine.create_depth_overlay(original_cv, depth_map)
+                depth_path = os.path.join(app.config['UPLOAD_FOLDER'], f"debug_depth_{int(time.time())}.png")
+                cv2.imwrite(depth_path, depth_overlay)
+                
+                print(f"[LEONARDO COPILOT] Depth Analysis Ready. Floor Depth: {depth_data['avg_floor_depth']:.2f}", flush=True)
+            except Exception as e:
+                print(f"[WARNING] Depth Estimation failed: {e}", flush=True)
+        if not masks:
+            h, w = original_cv.shape[:2]
+            floor_mask = np.zeros((h, w), dtype=np.uint8)
+            mask_top = int(h * 0.20)
+            pts = np.array([[(int(w * 0.10), mask_top), (int(w * 0.90), mask_top), (w, h), (0, h)]], dtype=np.int32)
+            cv2.fillPoly(floor_mask, pts, 255)
+            masks = {
+                'protected': np.zeros((h, w), dtype=np.uint8), # No protection in fallback
+                'editable': floor_mask,
+                'alpha': cv2.GaussianBlur(floor_mask.astype(np.float32), (31, 31), 0) / 255.0,
+                'debug': np.zeros((h, w, 3), dtype=np.uint8) # Empty black debug image
+            }
 
-        # 5. Build Final Prompt (Exact same as Colab)
+        # 4. PROMPT ORCHESTRATION
         if room_type == "other":
             selected_prompt = custom_prompt if custom_prompt else "luxury modern interior"
         else:
             prompts = ROOM_PROMPTS.get(room_type, ROOM_PROMPTS["bedroom"])
             selected_prompt = random.choice(prompts)
 
-        final_prompt = f"""
-Transform this EXACT SAME room into:
-{selected_prompt}
+        # Build a cleaner, non-redundant prompt
+        final_prompt = (
+            f"Transform this EXACT room into: {selected_prompt}. "
+            f"User request: {additional_prompt}."
+        )
 
-Additional user requirements:
-{additional_prompt}
+        # 5. GENERATION & RESTORATION (Production Pipeline)
+        print("[LEONARDO COPILOT] Triggering Production Pipeline...", flush=True)
+        if generation_engine:
+            # The redesign_room method handles: Upload -> Generate -> Poll -> Composite (Restoration)
+            final_composite, err = generation_engine.redesign_room(
+                original_image=original_cv,
+                style_prompt=final_prompt,
+                masks=masks,
+                image_strength=0.3,
+                depth_data=depth_data # Pass depth metadata for spatial anchoring
+            )
+            
+            if err:
+                return jsonify({'success': False, 'error': f"Generation Pipeline Error: {err}"}), 500
+                
+            # Upload final result to R2
+            _, buffer = cv2.imencode('.png', final_composite)
+            public_url, upload_err = upload_to_r2(buffer.tobytes(), f"results/copilot_{int(time.time())}.png")
+            
+            if upload_err:
+                return jsonify({'success': False, 'error': f"Result upload failed: {upload_err}"}), 500
 
-VERY IMPORTANT:
-DO NOT CHANGE WALLS.
-DO NOT CHANGE WINDOWS.
-DO NOT CHANGE WINDOW POSITION.
-DO NOT CHANGE ROOM SIZE.
-DO NOT CHANGE ROOM GEOMETRY.
-DO NOT CHANGE FLOOR PERSPECTIVE.
-DO NOT CHANGE CEILING.
-DO NOT CHANGE CAMERA ANGLE.
-DO NOT CHANGE STRUCTURE.
-DO NOT GENERATE NEW ROOM.
-DO NOT MODIFY ARCHITECTURE.
-
-ONLY:
-Add furniture.
-Add realistic interiors.
-Add decor items.
-Add lighting.
-Add realistic materials.
-
-Preserve exact room measurements.
-Preserve exact geometry.
-Preserve exact perspective.
-"""
-
-        # 6. Trigger Generation
-        print("[LEONARDO COPILOT] Triggering generation...", flush=True)
-        gen_id = leonardo_generate_inpaint(final_prompt, init_id, mask_id)
-        if not gen_id:
-            return jsonify({'success': False, 'error': 'Failed to trigger Leonardo generation'}), 500
-
-        # 7. Poll for Result
-        print("[LEONARDO COPILOT] Polling for result...", flush=True)
-        result_url = leonardo_wait_for_result(gen_id)
-        
-        if not result_url:
-            return jsonify({'success': False, 'error': 'Leonardo generation timed out or failed'}), 500
-
-        return jsonify({
-            'success': True,
-            'result_url': result_url,
-            'message': 'AI room generated successfully via Leonardo.ai',
-            'room_type': room_type
-        })
+            return jsonify({
+                'success': True,
+                'result_url': public_url,
+                'message': 'AI room generated successfully via Production Pipeline',
+                'room_type': room_type
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Generation Engine not initialized'}), 500
 
     except Exception as e:
         traceback.print_exc()

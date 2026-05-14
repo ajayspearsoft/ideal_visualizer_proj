@@ -8,7 +8,6 @@ matplotlib
 PyMuPDF
 ultralytics
 transformers
-easyocr
 waitress
 boto3
 python-dotenv
