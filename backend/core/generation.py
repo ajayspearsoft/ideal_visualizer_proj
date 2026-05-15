@@ -11,6 +11,9 @@ from typing import Dict, Optional, Tuple, Any
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("GenerationEngine")
 
+# Leonardo REST API rejects prompts over this length (entire string including --neg).
+LEONARDO_PROMPT_CHAR_LIMIT = 1500
+
 class GenerationEngine:
     """
     Production-safe Leonardo AI Orchestrator with Geometric Restoration.
@@ -28,7 +31,7 @@ class GenerationEngine:
             "authorization": f"Bearer {self.api_key}"
         }
 
-    def redesign_room(self, original_image: np.ndarray, style_prompt: str, masks: dict, image_strength: float = 0.2, depth_data: dict = None) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    def redesign_room(self, original_image: np.ndarray, style_prompt: str, masks: dict, image_strength: float = 0.10, depth_data: dict = None) -> Tuple[Optional[np.ndarray], Optional[str]]:
         """
         Production pipeline for depth-aware room redesign.
         """
@@ -36,11 +39,9 @@ class GenerationEngine:
             # 1. Image & Prompt Pre-processing
             h, w = original_image.shape[:2]
             
-            # Incorporate depth cues into the prompt if available
+            # Depth cue is omitted here because Leonardo's prompt budget is tight and
+            # the extra text was crowding out stronger visual layout instructions.
             enhanced_style = style_prompt
-            if depth_data:
-                depth_cue = f"Perspective aligned with deep floor plane (depth: {depth_data.get('avg_floor_depth', 0):.0f}). "
-                enhanced_style = f"{depth_cue} {style_prompt}"
             if max(h, w) > 1024:
                 scale = 1024 / max(h, w)
                 original_image = cv2.resize(original_image, (int(w * scale), int(h * scale)))
@@ -81,16 +82,28 @@ class GenerationEngine:
             return None, f"Internal Pipeline Error: {str(e)}"
 
     def _build_production_prompt(self, user_prompt: str) -> str:
-        """Enforces mandatory architectural preservation via silent backend append logic."""
-        preservation = (
-            "ARCHITECTURAL INTEGRITY: Maintain exact room dimensions and perspective. "
-            "Preserve original window, door, and ceiling positions. "
-            "Transform the interior with new furniture, wardrobes, lighting, and premium textures."
+        """Append compact preservation + negative; trim to Leonardo's 1500-char API limit."""
+        preservation = "keep exact window, door, wall, ceiling, and camera geometry"
+        quality = "photoreal DSLR interior photo, realistic scale, natural daylight plus warm practical light, tactile laminate and fabric textures"
+        neg = (
+            "distorted walls, moved windows, blurry, duplicate furniture, clutter, walk-in closet only, "
+            "wardrobes on every wall, missing bed, missing mattress, tiny bed, bed in corner, open closet, hanging clothes, exposed shelves, "
+            "empty room, sterile showroom, boutique display, flat cg lighting, oversaturated hdr, cartoon, anime, plastic render, cgi, concept art, "
+            "floating furniture, overly smooth surfaces, glossy fake materials, unreal hotel suite styling"
         )
-        
-        pos = f"(Masterpiece:1.2), {user_prompt}, {preservation}, photorealistic, sharp focus, 8k, realistic lighting"
-        neg = "distorted walls, moving windows, shifted doors, curved lines, melting structure, blurry, extra furniture, messy layout"
-        return f"{pos} --neg {neg}"
+        prefix = "(Masterpiece:1.35), "
+        tail = f", {preservation}, {quality} --neg {neg}"
+        core = (user_prompt or "").strip()
+        budget = LEONARDO_PROMPT_CHAR_LIMIT - len(prefix) - len(tail)
+        if budget < 32:
+            budget = 32
+        if len(core) > budget:
+            core = core[: max(0, budget - 3)].rstrip() + "..."
+            logger.warning(
+                "[GENERATION] Prompt trimmed to %s chars for Leonardo limit",
+                LEONARDO_PROMPT_CHAR_LIMIT,
+            )
+        return f"{prefix}{core}{tail}"
 
     def _upload_canvas_assets(self, image: np.ndarray, mask: np.ndarray) -> Tuple[Optional[str], Optional[str], int, int]:
         """Leonardo's specialized Canvas upload flow for linked Init/Mask assets."""
@@ -158,11 +171,10 @@ class GenerationEngine:
         width = (width // 8) * 8
         height = (height // 8) * 8
             
-        # 2. Balanced Geometry settings
-        guidance = 7
-        strength = 0.25
-        
-        print(f"[GUIDANCE STRENGTH]: {strength} (Creativity: {1-strength})")
+        # Leonardo canvas: UI inpaint strength ≈ 1 - init_strength (lower init_strength => more change in mask)
+        guidance = 15
+        approx_ui_inpaint = max(0.0, min(1.0, 1.0 - strength))
+        print(f"[LEONARDO] init_strength={strength} (approx UI inpaint strength ~{approx_ui_inpaint:.2f}), guidance_scale={guidance}")
             
         payload = {
             "height": height,

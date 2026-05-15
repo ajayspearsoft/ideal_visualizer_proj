@@ -70,6 +70,7 @@ from core.segmentation import SegmentationEngine
 from core.geometry import GeometryEngine
 from core.generation import GenerationEngine
 from core.depth import DepthEngine
+from core.prompt_templates import ROOM_PROMPTS
 
 try:
     from docx import Document
@@ -379,7 +380,8 @@ def load_models():
         segmentation_engine = SegmentationEngine(
             yolov11_model=yolo_model,
             scene_model=scene_model,
-            scene_processor=scene_processor
+            scene_processor=scene_processor,
+            device=device,
         )
         geometry_engine = GeometryEngine(model_path="models/mlsd_tiny_512_fp32.onnx")
         depth_engine = DepthEngine(model=depth_model, transform=depth_transform)
@@ -3042,41 +3044,6 @@ def login():
 # AI COPILOT — GEOMETRY LOCKED INTERIOR REDESIGN ENGINE
 # Replicates the Colab notebook exactly
 # ============================================================
-ROOM_PROMPTS = {
-    "bedroom": [
-        "Modern blue and white master bedroom, keep exact same room measurements and geometry, edit only existing room, stylish king size bed, elegant blue and white wardrobes with soft LED lights, modern TV unit and lowers, premium curtains, dressing table with mirror, wall mounted AC, false ceiling lights, clean luxury interior, realistic lighting, modern aesthetic, ultra realistic render",
-        "Luxury bedroom makeover in blue and white theme, preserve original room size and structure, modern bed design, full wall wardrobes, sleek lowers and storage cabinets, soft curtains, dressing table with round mirror, split AC, warm LED ceiling lights, stylish and premium interior design, realistic architecture visualization",
-        "Elegant modern bedroom interior, do not change room dimensions, edit same room only, blue and white color combination, cozy king bed, glossy wardrobes with hidden lights, stylish lowers, beautiful curtains, compact dressing table and mirror, AC unit, minimalist luxury bedroom, cinematic lighting, photorealistic render",
-        "Contemporary master bedroom design in navy blue and white colors, maintain same room measurements and perspective, premium bed with cushions, modern wardrobes, TV lowers and cabinets, soft flowing curtains, dressing table with LED mirror, wall AC, elegant ceiling lighting, bright and classy luxury interior",
-        "Stylish blue and white bedroom renovation, preserve exact room geometry and wall positions, modern upholstered bed, sleek custom wardrobes, matching lowers, elegant curtains, dressing table and mirror setup, split AC, warm ambient lighting, modern luxury bedroom, ultra detailed realistic interior render"
-    ],
-    "living_room": [
-        """
-        ultra luxury modern living room. 
-        SCENE ANALYSIS: Identify the central wall. PLACE A LARGE CINEMATIC FLAT-SCREEN TV on the wall. Align a luxury L-shaped sofa perfectly on the floor. 
-        INSTRUCTIONS: Enhance existing wall niches/arches with decor. Use marble textures, warm LED lighting, and indoor plants. 
-        STRICT GEOMETRY LOCK: Keep all structural lines, arches, and windows intact.
-        """
-    ],
-    "kitchen": [
-        """
-        ultra modern modular kitchen with premium matte cabinets and marble countertops. 
-        SCENE ANALYSIS: Follow the existing wall lines for cabinet placement. 
-        INSTRUCTIONS: Add a sophisticated kitchen island and warm under-cabinet lighting. 
-        STRICT GEOMETRY LOCK: Do not change room structure.
-        """
-    ],
-    "bathroom": [
-        """
-        ultra luxury hotel-style bathroom with Italian marble. 
-        SCENE ANALYSIS: Place a floating vanity and large backlit mirror. 
-        INSTRUCTIONS: Add golden fittings and ambient LED lighting. 
-        STRICT GEOMETRY LOCK: Preserve mirror and window positions.
-        """
-    ]
-}
-
-
 # ============================================================
 # LEONARDO.AI INTEGRATION (CANVAS INPAINTING)
 # ============================================================
@@ -3145,8 +3112,8 @@ def leonardo_generate_inpaint(prompt, init_id, mask_id):
             "num_images": 1,
             "width": 1024,
             "height": 768,
-            "init_strength": 0.2, # Very High change (0.8 inpaint strength)
-            "guidance_scale": 15, # Maximum guidance to follow prompt strictly
+            "init_strength": 0.10,  # Leonardo: UI inpaint strength ≈ 1 - init_strength (~0.90)
+            "guidance_scale": 15,  # Strong prompt adherence
             "canvasRequest": True,
             "canvasRequestType": "INPAINT",
             "canvasInitId": init_id,
@@ -3279,27 +3246,29 @@ def ai_copilot_generate_leonardo():
 
         # 4. PROMPT ORCHESTRATION
         if room_type == "other":
-            selected_prompt = custom_prompt if custom_prompt else "luxury modern interior"
+            selected_prompt = custom_prompt if custom_prompt else "photoreal luxury interior"
         else:
             prompts = ROOM_PROMPTS.get(room_type, ROOM_PROMPTS["bedroom"])
-            selected_prompt = random.choice(prompts)
+            # Keep generations consistent and easier to evaluate while tuning quality.
+            selected_prompt = prompts[0]
 
-        # Build a cleaner, non-redundant prompt
-        final_prompt = (
-            f"Transform this EXACT room into: {selected_prompt}. "
-            f"User request: {additional_prompt}."
-        )
+        # Build prompt (avoid ".." when template already ends with punctuation)
+        body = (selected_prompt or "").strip().rstrip(".").strip()
+        final_prompt = f"Transform this EXACT room into: {body}."
+        if additional_prompt and additional_prompt.strip() not in [".", ""]:
+            add = additional_prompt.strip().rstrip(".").strip()
+            final_prompt += f" User request: {add}."
 
         # 5. GENERATION & RESTORATION (Production Pipeline)
         print("[LEONARDO COPILOT] Triggering Production Pipeline...", flush=True)
         if generation_engine:
-            # The redesign_room method handles: Upload -> Generate -> Poll -> Composite (Restoration)
+            effective_strength = 0.13 if room_type == "bedroom" else 0.10
             final_composite, err = generation_engine.redesign_room(
                 original_image=original_cv,
                 style_prompt=final_prompt,
                 masks=masks,
-                image_strength=0.3,
-                depth_data=depth_data # Pass depth metadata for spatial anchoring
+                image_strength=effective_strength,
+                depth_data=depth_data,
             )
             
             if err:

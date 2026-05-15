@@ -249,7 +249,7 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
               <textarea
                 value={additionalPrompt}
                 onChange={(e) => setAdditionalPrompt(e.target.value)}
-                placeholder="e.g. Add marble flooring, warm lighting, minimalist furniture..."
+                placeholder="e.g. Match reference: mint wardrobes, charcoal tufted bed, marble-vein floor, cove ceiling + fan..."
                 rows={3}
                 className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50 resize-none transition-all"
               />

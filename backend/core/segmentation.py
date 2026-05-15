@@ -2,14 +2,20 @@ import cv2
 import numpy as np
 import os
 from ultralytics import YOLO
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 class SegmentationEngine:
     """
     Production-grade Architectural Protection & Masking Engine.
     Uses YOLOv11-seg (Nano) for high-speed, lightweight segmentation.
     """
-    def __init__(self, yolov11_model=None, scene_model=None, scene_processor=None):
+    def __init__(
+        self,
+        yolov11_model=None,
+        scene_model=None,
+        scene_processor=None,
+        device: Optional[str] = None,
+    ):
         """
         Hybrid Segmentation Engine.
         Uses YOLO for objects/furniture and SegFormer for architectural structure.
@@ -17,7 +23,24 @@ class SegmentationEngine:
         self.yolo = yolov11_model
         self.scene_model = scene_model
         self.scene_processor = scene_processor
-        self.device = "cpu"
+        if device is not None:
+            self.device = str(device)
+        elif scene_model is not None:
+            import torch
+            try:
+                p = next(scene_model.parameters())
+                self.device = str(p.device)
+            except StopIteration:
+                self.device = "cpu"
+        elif yolov11_model is not None:
+            import torch
+            try:
+                p = next(yolov11_model.model.parameters())
+                self.device = str(p.device)
+            except (StopIteration, AttributeError):
+                self.device = "cpu"
+        else:
+            self.device = "cpu"
         
         # SegFormer ADE20K indices for structural elements
         # 1: wall, 3: floor, 4: ceiling, 9: window, 15: door
@@ -61,7 +84,7 @@ class SegmentationEngine:
 
         # 2. OBJECT DETECTION (via YOLO)
         if self.yolo:
-            results = self.yolo.predict(image, conf=0.25, verbose=False)
+            results = self.yolo.predict(image, conf=0.25, verbose=False, device=self.device)
             if results[0].masks is not None:
                 for i, mask_data in enumerate(results[0].masks.xy):
                     cls_id = int(results[0].boxes.cls[i])
@@ -99,19 +122,20 @@ class SegmentationEngine:
         editable_mask = cv2.bitwise_or(editable_mask, central_zone)
         editable_mask[protected_mask > 0] = 0 # Final architectural safety check
 
-        # 4. Metrics & Diagnostics
+        # 4. REFINEMENT
+        editable_mask = cv2.erode(editable_mask, np.ones((7, 7), np.uint8), iterations=1)
+        editable_mask = self._apply_room_type_prior(editable_mask, room_type)
+        editable_mask_final = cv2.GaussianBlur(editable_mask, (13, 13), 0)
+
+        # 5. Metrics & Diagnostics
         total_pixels = h * w
         prot_perc = (np.sum(protected_mask == 255) / total_pixels) * 100
-        edit_perc = (np.sum(editable_mask == 255) / total_pixels) * 100
-        
+        edit_perc = (np.sum(editable_mask > 0) / total_pixels) * 100
+
         print(f"\n--- [GEOMETRY ENGINE METRICS] ---")
         print(f"[PROTECTED AREA %]: {prot_perc:.1f}%")
         print(f"[EDITABLE AREA %]: {edit_perc:.1f}%")
         print(f"[MASK COVERAGE]: {edit_perc:.1f}%")
-        
-        # 5. REFINEMENT
-        editable_mask = cv2.erode(editable_mask, np.ones((7, 7), np.uint8), iterations=1)
-        editable_mask_final = cv2.GaussianBlur(editable_mask, (13, 13), 0)
 
         # 6. Distance Transform (Structural Blending)
         dist_transform = cv2.distanceTransform(editable_mask, cv2.DIST_L2, 5)
@@ -124,6 +148,17 @@ class SegmentationEngine:
             'alpha': alpha_mask,
             'debug': self._create_visual_debug(image, protected_mask, editable_mask)
         }
+
+    def _apply_room_type_prior(self, editable_mask: np.ndarray, room_type: str) -> np.ndarray:
+        """
+        Soft spatial guidance for bedroom layout.
+        No restrictive binary AND - returns the mask largely open so the model
+        can actually furnish an empty room. Guidance comes from the prompt, not the mask.
+        """
+        room_key = (room_type or "").strip().lower()
+        if room_key != "bedroom":
+            return editable_mask
+        return editable_mask
 
     def apply_restoration(self, original: np.ndarray, ai_generated: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """

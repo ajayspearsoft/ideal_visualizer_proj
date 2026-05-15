@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from core.geometry import GeometryEngine
 from core.segmentation import SegmentationEngine
 from core.generation import GenerationEngine
+from core.prompt_templates import ROOM_PRESETS
 
 # Load Environment
 load_dotenv()
@@ -40,14 +41,6 @@ generation_engine = GenerationEngine(
 
 # Thread Pool for CPU-bound Computer Vision tasks
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-
-# --- PROMPT TEMPLATE SYSTEM ---
-ROOM_PRESETS = {
-    "living_room": "luxurious modern living room, designer furniture, ambient lighting, high-end textures",
-    "bedroom": "Modern blue and white master bedroom, keep exact same room measurements and geometry, edit only existing room, stylish king size bed, elegant blue and white wardrobes with soft LED lights, modern TV unit and lowers, premium curtains, dressing table with mirror, wall mounted AC, false ceiling lights, clean luxury interior, 8k render",
-    "kitchen": "sleek contemporary kitchen, marble countertops, state-of-the-art appliances, clean lines",
-    "bathroom": "spa-like modern bathroom, premium tiling, soft indirect lighting, natural stone elements"
-}
 
 class RedesignResponse(BaseModel):
     success: bool
