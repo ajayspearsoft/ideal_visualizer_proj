@@ -66,7 +66,7 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
 
       setStatusText('Running depth estimation & generating floor mask...')
       await new Promise(r => setTimeout(r, 800))
-      setStatusText('Calling AI engine (gpt-image-1)... This may take 30-60 seconds...')
+      setStatusText('Analyzing room layout & generating with Flux...')
 
       const response = await fetch(`${API_BASE_URL}/api/ai-copilot-generate`, {
         method: 'POST',

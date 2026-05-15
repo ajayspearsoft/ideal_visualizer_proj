@@ -4,13 +4,13 @@ from typing import Dict, List
 ROOM_PROMPTS: Dict[str, List[str]] = {
     "bedroom": [
         (
-    "Photorealistic interior photography, Indian master bedroom, DSLR shot, natural daylight. King bed dark grey tufted upholstered headboard, brown cushions, linen bedsheet, foreground lower frame. Full-wall closed modular wardrobe mint sage laminate shutters black slim handles bottom drawers. Illuminated mirror niche warm LED strip. Wall-mounted TV unit sage green. POP false ceiling cove lighting strips ceiling fan recessed spotlights. Large format white marble vitrified tile floor. Sheer curtains window. Beige cream walls. Premium Indian apartment, realistic textures, no CGI, no animation, photographic quality, 8k."
+    "Photorealistic interior photography, Indian master bedroom, DSLR shot, natural daylight. King bed dark grey tufted upholstered headboard, vertical charcoal louvers slatted wood panels on the bed back wall, brown cushions, linen bedsheet, foreground lower frame. Full-wall closed modular wardrobe mint sage laminate shutters black slim handles bottom drawers. Illuminated mirror niche warm LED strip. Wall-mounted TV unit sage green. POP false ceiling cove lighting strips ceiling fan recessed spotlights. Large format white marble vitrified tile floor. Sheer curtains window. Beige cream walls. Premium Indian apartment, realistic textures, no CGI, no animation, photographic quality, 8k."
 ),
 (
-    "Real photo Indian master bedroom, not render not illustration. King bed tufted fabric headboard grey, pillows bedsheet side tables, close to camera foreground. One full wall closed laminate wardrobe mint green shutters long black handles storage drawers. Dressing mirror niche LED backlit. TV panel wall mounted. POP ceiling fan warm cove light recessed spots. White marble floor tiles. Cream beige walls curtains window. Middle class premium Indian apartment interior, believable materials textures lighting, photorealistic 8k DSLR."
+    "Real photo Indian master bedroom, not render not illustration. King bed tufted fabric headboard grey, bed background wall with premium vertical wood louvers and slatted paneling, side tables, close to camera foreground. One full wall closed laminate wardrobe mint green shutters long black handles storage drawers. Dressing mirror niche LED backlit. TV panel wall mounted. POP ceiling fan warm cove light recessed spots. White marble floor tiles. Cream beige walls curtains window. Middle class premium Indian apartment interior, believable materials textures lighting, photorealistic 8k DSLR."
 ),
 (
-    "Modern Indian apartment bedroom real photograph. Complete king bed upholstered headboard fabric grey linen sheets cushions foreground. Closed full wall modular wardrobe sage mint laminate shutters handles drawers. Mirror niche warm glow TV unit. False POP ceiling indirect cove light ceiling fan spotlights. Vitrified marble look floor tiles. Soft beige ivory walls sheer curtains. Balanced practical layout warm ambient light realistic laminate fabric materials subtle decor, not CGI not animated not showroom, preserve room geometry, photographic quality 8k."
+    "Modern Indian apartment bedroom real photograph. Complete king bed upholstered headboard fabric grey, textured bed back wall with decorative louvers and warm LED strips, linen sheets cushions foreground. Closed full wall modular wardrobe sage mint laminate shutters handles drawers. Mirror niche warm glow TV unit. False POP ceiling indirect cove light ceiling fan spotlights. Vitrified marble look floor tiles. Soft beige ivory walls sheer curtains. Balanced practical layout warm ambient light realistic laminate fabric materials subtle decor, not CGI not animated not showroom, photographic quality 8k."
 ),
     ],
     "living_room": [
@@ -27,16 +27,14 @@ ROOM_PROMPTS: Dict[str, List[str]] = {
     ],
     "kitchen": [
         (
-    "Photorealistic Indian kitchen, DSLR shot, bright natural daylight. L-shaped modular kitchen layout. Base cabinets dark wood laminate grey matte shutters. Overhead white matte laminate cabinets vertical handles. Countertop black granite. Stainless steel sink faucet. Chimney over hob hob not fully visible. Under cabinet LED strips. Storage drawers cabinets. Small appliances mixer grinder toaster microwave on counter. Grey vitrified tile floor. White beige walls. Clean organized practical Indian kitchen, realistic textures, not CGI, photographic quality 8k."
+    "Photorealistic interior photography, modern Indian modular kitchen, DSLR. Solid modular base and wall cabinets charcoal grey, seamless black granite countertop, stainless steel sink and tap. Tiled backsplash, built-in oven and hob. POP false ceiling recessed spots. Large format floor tiles. Natural window light. Clean clutter-free layout, realistic materials, no CGI 8k."
 ),
 (
-    "Real photo modular kitchen India. Full length L-shaped layout base cabinets wood finish shutters overhead cabinets white matte. Granite or quartz countertop. Stainless steel sink tap chimney. Warm under cabinet lighting. Storage drawers open shelves. Grey brown vitrified floor tiles. Pastel walls tiles accent wall. Practical middle class apartment kitchen, realistic materials, photographic quality 8k."
+    "Real photo Indian kitchen, modular cabinets light wood finish, white marble countertop, built-in chimney. Strictly solid modular cabinetry, replace all open shelving with closed laminate shutters. Backlit backsplash, ceiling spotlights. Realistic textures, photographic quality, not a render 8k."
 ),
 (
-    "Modern Indian kitchen real photograph. Base cabinets wood tone matte laminate. White matte overhead cabinets long vertical handles. Granite or composite countertop black grey. Stainless steel sink mixer microwave chimney. False ceiling with downlights. Beige white tile walls. Grey vitrified floor. Clean functional layout, realistic proportions, warm task lighting, photographic quality 8k."
+    "Modern Indian kitchen real photograph. Solid base cabinets wood tone matte laminate. White matte overhead cabinets long vertical handles. Granite or composite countertop black grey. False ceiling with downlights. Beige white tile walls. Grey vitrified floor. Clean functional layout, realistic proportions, warm task lighting, photographic quality 8k."
 ),
-        
-        
     ],
     "bathroom": [
         (
