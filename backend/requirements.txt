@@ -18,4 +18,5 @@ openai
 python-docx
 timm
 rembg[cpu]
-scipy
+scipy
+fal-client

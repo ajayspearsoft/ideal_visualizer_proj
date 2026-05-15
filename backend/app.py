@@ -149,10 +149,8 @@ r2_client = boto3.client(
     region_name='auto'
 )
 
-# Leonardo.ai Configuration
-LEONARDO_API_KEY = os.getenv("LEONARDO_API_KEY")
-LEONARDO_API_URL = "https://cloud.leonardo.ai/api/rest/v1"
-LEONARDO_MODEL_ID = "1e60896f-3c26-4296-8ecc-53e2afecc132" # Leonardo Diffusion XL (Excellent for Inpainting)
+# Fal.ai Configuration
+FAL_KEY = os.getenv("FAL_KEY")
 
 def upload_to_r2(file_data, object_name, content_type='image/png'):
     try:
@@ -385,7 +383,7 @@ def load_models():
         )
         geometry_engine = GeometryEngine(model_path="models/mlsd_tiny_512_fp32.onnx")
         depth_engine = DepthEngine(model=depth_model, transform=depth_transform)
-        generation_engine = GenerationEngine(api_key=LEONARDO_API_KEY, model_id=LEONARDO_MODEL_ID)
+        generation_engine = GenerationEngine(api_key=FAL_KEY)
         print("[DEBUG] Production Engines Initialized", flush=True)
 
         # 6. GLOBAL CPU OPTIMIZATION
@@ -3167,8 +3165,8 @@ def ai_copilot_generate_leonardo():
     import random
     import io
 
-    if not LEONARDO_API_KEY:
-        return jsonify({'success': False, 'error': 'Leonardo API key not configured'}), 500
+    if not FAL_KEY:
+        return jsonify({'success': False, 'error': 'AI Generation Engine not configured'}), 500
 
     try:
         if 'room_image' not in request.files:
@@ -3246,18 +3244,14 @@ def ai_copilot_generate_leonardo():
 
         # 4. PROMPT ORCHESTRATION
         if room_type == "other":
-            selected_prompt = custom_prompt if custom_prompt else "photoreal luxury interior"
+            final_prompt = custom_prompt if custom_prompt else "photoreal luxury interior"
         else:
             prompts = ROOM_PROMPTS.get(room_type, ROOM_PROMPTS["bedroom"])
-            # Keep generations consistent and easier to evaluate while tuning quality.
-            selected_prompt = prompts[0]
+            final_prompt = prompts[0]
 
-        # Build prompt (avoid ".." when template already ends with punctuation)
-        body = (selected_prompt or "").strip().rstrip(".").strip()
-        final_prompt = f"Transform this EXACT room into: {body}."
+        # Add user's specific request if provided
         if additional_prompt and additional_prompt.strip() not in [".", ""]:
-            add = additional_prompt.strip().rstrip(".").strip()
-            final_prompt += f" User request: {add}."
+            final_prompt += f", {additional_prompt.strip()}"
 
         # 5. GENERATION & RESTORATION (Production Pipeline)
         print("[LEONARDO COPILOT] Triggering Production Pipeline...", flush=True)

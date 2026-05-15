@@ -31,13 +31,9 @@ app.add_middleware(
 )
 
 # Initialize Engines (Loaded once into memory for speed)
-# Use relative paths for production deployment
 geometry_engine = GeometryEngine(model_path="models/mlsd_tiny_512_fp32.onnx")
 segmentation_engine = SegmentationEngine(model_path="models/yolov11n-seg.pt")
-generation_engine = GenerationEngine(
-    api_key=os.getenv("LEONARDO_API_KEY"),
-    model_id=os.getenv("LEONARDO_MODEL_ID", "1e60896f-3c26-4296-8ecc-53e2afecc132")
-)
+generation_engine = GenerationEngine(api_key=os.getenv("FAL_KEY"))
 
 # Thread Pool for CPU-bound Computer Vision tasks
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
@@ -70,7 +66,7 @@ async def redesign_room(
     room_type: str = Form("living_room"),
     style: str = Form("modern"),
     custom_requirements: Optional[str] = Form(None),
-    image_strength: float = Form(0.75)
+    image_strength: float = Form(0.5)
 ):
     start_time = time.time()
     
@@ -90,8 +86,7 @@ async def redesign_room(
         if custom_requirements:
             user_prompt += f", {custom_requirements}"
         
-        # 4. Call Leonardo Generation Pipeline (I/O Bound)
-        # This handles: Upload -> Poll -> Composite -> Restoration
+        # 4. Call Fal.ai Flux Pro Generation Pipeline
         final_result, err = generation_engine.redesign_room(
             original_image=original_img,
             style_prompt=user_prompt,
@@ -102,14 +97,12 @@ async def redesign_room(
         if err:
             raise HTTPException(status_code=500, detail=err)
 
-        # 5. Production Result Management
-        # (In production, you would upload final_result to S3/R2 and return the URL)
-        # For this demonstration, we assume generation_engine handles the upload
-        
-        # Mocking URL for this example - in reality, generation_engine returns a URL or B64
+        # 5. Result Management
+        # In production, you would upload final_result to S3/R2 and return the URL.
+        # For now, we return a success status.
         return RedesignResponse(
             success=True,
-            final_image_url="https://your-s3-bucket.com/results/final_output.png",
+            final_image_url="Generation Successful",
             processing_time=time.time() - start_time
         )
 
@@ -126,5 +119,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    # Use uvicorn for high-performance production serving
     uvicorn.run(app, host="0.0.0.0", port=8000)
