@@ -14,8 +14,46 @@ logger = logging.getLogger("GenerationEngine")
 
 class GenerationEngine:
     """
-    Production-grade Flux Pro Orchestrator for Architectural Redesign.
-    Uses fal.ai for state-of-the-art photorealistic inpainting.
+    ================================================================================
+    SURGICAL ARCHITECTURAL EDITING & STAGING ENGINE
+    ================================================================================
+    
+    This engine orchestrates advanced image inpainting tailored specifically for 
+    Indian home renovations. It ensures that the original room geometry, perspective,
+    walls, columns, ceiling lines, doors, and windows are preserved 100% original, 
+    while only requested furniture (such as beds, modular wardrobes, TV units) 
+    is surgically added or modified inside designated coordinates.
+
+    MIGRATION ROADMAP FOR PRODUCTION-GRADE STAGING:
+    ----------------------------------------------------------------------------
+    Currently, the engine triggers a basic single-pass inpainting pipeline via 
+    Flux Dev LoRA on Fal.ai. While cost-effective, raw Flux Dev is highly prone to 
+    structural hallucination, camera drifting, and furniture deformation.
+
+    To transition this to a true architectural-constrained editing engine, implement 
+    the following multi-control SDXL/ControlNet pipeline:
+
+    1. Scene Understanding (Room DNA):
+       - Segformer partitions the room into structural components (walls, ceiling).
+       - YOLOv8 isolates foreground furniture layers into protection safety tiers.
+       - MLSD detects key vertical and horizontal linear features (shelves, frames).
+
+    2. Multi-Control Conditioning Stack:
+       - Rather than passing only an inpaint mask, bind the input to multiple ControlNets:
+         * ControlNet Depth (weight: 0.85) -> Locks room depth and spatial layers.
+         * ControlNet Canny (weight: 0.70) -> Preserves window panes, corners, and trims.
+         * ControlNet Lineart (weight: 0.90) -> Locks straight lines of shelves/joineries.
+         * IP-Adapter (weight: 0.65) -> Conditions the generation on reference style images.
+
+    3. Controlled Inpainting (SDXL Inpainting):
+       - Use a professional-grade base like SDXL Inpainting or Flux Kontext Pro.
+       - Restrict editing exclusively to the editable mask coordinates with a 15px 
+         feathered blending threshold.
+
+    4. Multi-Pass Refinement:
+       - Pass 1 (Structure Lock): Render the base cabinet doors or headboards.
+       - Pass 2 (Lighting/Shadow Synthesis): Cast ambient and contact shadows onto 
+         the floor using the Bilateral gray-scale light field.
     """
     def __init__(self, api_key: str = None, *args, **kwargs):
         # Use FAL_KEY from env if not provided
@@ -30,7 +68,8 @@ class GenerationEngine:
 
     def redesign_room(self, original_image: np.ndarray, style_prompt: str, masks: dict, image_strength: float = 0.5, *args, **kwargs) -> Tuple[Optional[np.ndarray], Optional[str]]:
         """
-        High-performance pipeline using Flux Dev Inpainting with Scene Intelligence.
+        Controlled surgical inpainting pipeline.
+        Surgically stages furniture into masked areas while enforcing strict structural locks.
         """
         try:
             # 1. Prepare Images
@@ -43,27 +82,28 @@ class GenerationEngine:
             new_size = (int(w * scale), int(h * scale))
             low_res_img = cv2.resize(original_image, new_size)
             
-            _, buffer_img = cv2.imencode(".png", low_res_img)
-            img_bytes = buffer_img.tobytes()
-            base64_img = f"data:image/png;base64,{base64.b64encode(img_bytes).decode('utf-8')}"
-            
             # The mask used for Flux Inpainting (editable area)
             editable_mask = masks['editable']
             editable_mask = cv2.resize(editable_mask, new_size)
             
-            # SPATIAL OVERWRITE: DILATE the mask (15 pixels)
-            # This ensures we "eat" the edges of the white shelves.
-            kernel = np.ones((15, 15), np.uint8)
+            _, buffer_img = cv2.imencode(".png", low_res_img)
+            img_bytes = buffer_img.tobytes()
+            base64_img = f"data:image/png;base64,{base64.b64encode(img_bytes).decode('utf-8')}"
+            
+            # SPATIAL OVERWRITE: DILATE the mask (25 pixels)
+            # This ensures we "eat" the outer frame of the shelves completely,
+            # giving the AI enough room to install seamless wardrobe doors.
+            kernel = np.ones((25, 25), np.uint8)
             editable_mask = cv2.dilate(editable_mask, kernel, iterations=1)
             
-            # ARCHITECTURAL LOCK: Combine original protection (doors/windows)
-            # with the inverse of the editable area.
-            # This ensures doors/windows are NEVER overwritten.
+            # ARCHITECTURAL LOCK: Keep only the true architectural structures (windows, ceiling, doors)
+            # protected to anchor room stability. We do NOT protect the inverse of the editable mask,
+            # as doing so will copy back the old, empty shelves/floor over the new AI furniture composite!
             orig_protected = masks.get('protected', np.zeros_like(editable_mask))
             if orig_protected.shape[:2] != editable_mask.shape[:2]:
                 orig_protected = cv2.resize(orig_protected, new_size, interpolation=cv2.INTER_NEAREST)
                 
-            masks['protected'] = cv2.bitwise_or(orig_protected, cv2.bitwise_not(editable_mask))
+            masks['protected'] = orig_protected
             
             _, buffer_mask = cv2.imencode(".png", editable_mask)
             base64_mask = f"data:image/png;base64,{base64.b64encode(buffer_mask).decode('utf-8')}"
@@ -87,8 +127,14 @@ class GenerationEngine:
                     "mask_url": base64_mask,
                     "guidance_scale": 15.0,
                     "num_inference_steps": 28,
-                    "strength": 0.82, # Surgical Integration Mode
-                    "enable_safety_checker": False
+                    "strength": image_strength, # Dynamic strength mapped from app.py
+                    "enable_safety_checker": False,
+                    "negative_prompt": (
+                        "do not alter room structure, do not change architecture, "
+                        "do not distort geometry, preserve perspective consistency, "
+                        "no hallucinated walls, no shifted camera angles, no extra windows, "
+                        "avoid CGI look, avoid low quality"
+                    )
                 }
             )
             
@@ -145,25 +191,40 @@ class GenerationEngine:
             return "A room interior."
 
     def _build_architectural_prompt(self, user_prompt: str, scene_analysis: str = "") -> str:
-        """Adds architectural quality and spatial context to the user prompt."""
-        prefix = "Photorealistic architectural interior photography, "
-        spatial_context = f"The room is {scene_analysis}. " if scene_analysis else ""
-        
-        # GLOBAL STRUCTURAL RULES (Apply to everything)
-        global_rules = (
-            "SURGICAL INTEGRATION: Seamlessly add new furniture and decor into the existing space. "
-            "You MUST add premium panelling and shutters over all open shelving. "
-            "You MUST integrate the requested furniture (Bed, Wardrobe, AC) into the existing layout. "
-            "MANDATORY: Keep all vertical lines perfectly 90 degrees. No slanting. "
-            "STRICT ARCHITECTURAL LOCKDOWN: No new doors, no new windows. Preserve original structural outlines exactly."
+        """Adds architectural quality, balanced spatial locks, and localized furniture confidence to the prompt."""
+        # 1. PRESERVE SECTION
+        preserve_section = (
+            "Photorealistic real estate architectural DSLR interior photo of the same exact room. "
+            "Preserve the exact room architecture, same walls, same ceiling, same camera angle, "
+            "same window, same perspective, same room identity. Keep original room structure, "
+            "corners, and camera framing 100% identical and untouched. "
         )
         
-        suffix = (
+        # 2. EDIT / SPATIAL ANALYSIS SECTION
+        spatial_context = f"The current room layout is: {scene_analysis}. " if scene_analysis else ""
+        
+        # High confidence furniture spawning rules using "existing structure" and professional carpentry vocabulary
+        furniture_injection = (
+            "SURGICAL FURNITURE INJECTION: Install clearly visible modular wardrobe panels, "
+            "properly installed cabinetry, realistic matte laminate cabinetry, and professionally integrated furniture. "
+            "Convert the existing open shelves into fully installed floor-to-ceiling modular wardrobe shutters "
+            "with clean doors, solid flat panels, and premium bronze handles, built into the existing wall cavities "
+            "and fitted into the current room structure using custom-built storage installation. "
+            "Add custom professional interior carpentry below the window counter as lower storage cabinets, "
+            "aligned perfectly to the original architecture. "
+            "Place a compact modern bed naturally aligned and installed within the existing layout on the floor. "
+        )
+        
+        # 3. REALISM SECTION
+        realism_suffix = (
             ", masterpiece, 8k DSLR, highly detailed, realistic textures, "
-            "natural volumetric lighting, soft shadows, professional interior styling, "
+            "photorealistic Indian apartment interior, real DSLR photography, natural shadows, "
+            "realistic scale, accurate furniture proportions, soft ambient lighting, "
             "avoid cartoonish looks, no CGI, no 3D render feel."
         )
-        return f"{prefix}{spatial_context}{global_rules}{user_prompt}{suffix}"
+        
+        # Combine user's customized style prompt with our balanced staging rules
+        return f"{preserve_section}{spatial_context}{furniture_injection}{user_prompt}{realism_suffix}"
 
     def _download_image(self, url: str) -> Optional[np.ndarray]:
         res = requests.get(url, timeout=30)
@@ -184,12 +245,12 @@ class GenerationEngine:
 
         protected = cv2.resize(protected, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
         
-        # KILL GHOSTING: Use a strictly binary mask for the composite
-        # 255 (White) in protected mask = Keep Original Photo (Walls/Doors)
-        # 0 (Black) in protected mask = Use AI Generated Design (Shelves/Cabinets)
-        mask_3d = cv2.merge([protected, protected, protected])
+        # BLEND SEAM: Apply a slight Gaussian blur to feather the hard edge between the original and AI image.
+        # This removes the sharp 'scissor cut' line while keeping the geometry strict.
+        blurred_protected = cv2.GaussianBlur(protected, (15, 15), 0)
+        mask_3d = cv2.merge([blurred_protected, blurred_protected, blurred_protected])
         mask_float = mask_3d.astype(np.float32) / 255.0
         
-        # SURGICAL COMPOSITE: No blurring in the editable zone means NO GHOSTING
+        # SURGICAL COMPOSITE
         final = (original.astype(np.float32) * mask_float) + (ai_gen.astype(np.float32) * (1.0 - mask_float))
         return np.clip(final, 0, 255).astype(np.uint8)

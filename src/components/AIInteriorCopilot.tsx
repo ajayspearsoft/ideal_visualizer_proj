@@ -11,7 +11,10 @@ import {
   Image as ImageIcon,
   ChevronDown,
   RotateCcw,
-  Wand2
+  Wand2,
+  BrainCircuit,
+  Eye,
+  ListPlus
 } from 'lucide-react'
 
 const ROOM_OPTIONS = [
@@ -33,6 +36,12 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
   const [error, setError] = useState<string | null>(null)
   const [history, setHistory] = useState<string[]>([])
   const [statusText, setStatusText] = useState('')
+  const [currentPromptIndex, setCurrentPromptIndex] = useState<number>(-1)
+  const [totalVariations, setTotalVariations] = useState<number>(0)
+  
+  // AI Intent State
+  const [analyzing, setAnalyzing] = useState(false)
+  const [aiIntent, setAiIntent] = useState<any>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -43,16 +52,62 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
     setResultImage(null)
     setError(null)
     setStatusText('')
+    setAiIntent(null)
   }
 
-  const handleGenerate = async () => {
+  const handleAnalyze = async () => {
+    if (!roomImage) {
+      setError('Please upload a room image first')
+      return
+    }
+    setAnalyzing(true)
+    setError(null)
+    setStatusText('AI is analyzing room structure & intent...')
+
+    try {
+      const formData = new FormData()
+      formData.append('room_image', roomImage)
+      formData.append('room_type', roomType)
+      formData.append('additional_prompt', additionalPrompt)
+      if (roomType === 'other') {
+        formData.append('custom_prompt', customPrompt)
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/ai-copilot-analyze`, {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setAiIntent(data.intent)
+        // Auto-fill the suggested prompt so the generation uses it
+        if (data.intent.suggested_prompt && !additionalPrompt) {
+          setAdditionalPrompt(data.intent.suggested_prompt)
+        }
+        setStatusText('✅ Intent Analysis Complete!')
+      } else {
+        throw new Error(data.error || 'Analysis failed')
+      }
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong')
+      setStatusText('')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleGenerate = async (forcedIndex?: number) => {
     if (!roomImage) {
       setError('Please upload a room image first')
       return
     }
     setProcessing(true)
     setError(null)
-    setResultImage(null)
+    if (forcedIndex === undefined) {
+      setResultImage(null)
+    }
     setStatusText('Uploading image & analyzing room geometry...')
 
     try {
@@ -60,6 +115,10 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
       formData.append('room_image', roomImage)
       formData.append('room_type', roomType)
       formData.append('additional_prompt', additionalPrompt)
+      
+      const targetIndex = forcedIndex !== undefined ? forcedIndex : -1
+      formData.append('prompt_index', targetIndex.toString())
+      
       if (roomType === 'other') {
         formData.append('custom_prompt', customPrompt)
       }
@@ -78,6 +137,8 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
       if (data.success) {
         setResultImage(data.result_url)
         setHistory(prev => [data.result_url, ...prev])
+        setCurrentPromptIndex(data.prompt_index)
+        setTotalVariations(data.total_variations)
         setStatusText('✅ AI room generated successfully!')
       } else {
         throw new Error(data.error || 'Generation failed')
@@ -115,6 +176,7 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
     setStatusText('')
     setAdditionalPrompt('')
     setCustomPrompt('')
+    setAiIntent(null)
   }
 
   return (
@@ -255,9 +317,52 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
               />
             </div>
 
+            {/* AI Intent Analyzer */}
+            {roomPreview && (
+              <div className="space-y-3">
+                <button
+                  onClick={handleAnalyze}
+                  disabled={analyzing}
+                  className="w-full py-3 bg-white/5 hover:bg-white/10 disabled:bg-white/5 disabled:opacity-50 border border-violet-500/30 rounded-xl font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 text-violet-300"
+                >
+                  {analyzing ? (
+                    <><Loader2 size={16} className="animate-spin" /> Analyzing Intent...</>
+                  ) : (
+                    <><BrainCircuit size={16} /> Analyze Intent / Brain</>
+                  )}
+                </button>
+
+                {aiIntent && (
+                  <div className="bg-slate-900/80 border border-violet-500/20 rounded-xl p-4 space-y-3 text-sm">
+                    <div className="flex items-center gap-2 text-violet-400 font-bold uppercase tracking-wider text-[10px]">
+                      <Eye size={14} /> AI Scene Analysis
+                    </div>
+                    <p className="text-slate-300 text-xs leading-relaxed border-b border-white/10 pb-2">
+                      <span className="font-semibold text-white">Reasoning:</span> {aiIntent.reasoning}
+                    </p>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="text-emerald-400 font-bold block mb-1">Preserving:</span>
+                        <ul className="list-disc pl-4 text-slate-400 space-y-0.5">
+                          {aiIntent.preserve?.map((item: string, i: number) => <li key={i}>{item}</li>)}
+                        </ul>
+                      </div>
+                      <div>
+                        <span className="text-fuchsia-400 font-bold block mb-1">Adding/Modifying:</span>
+                        <ul className="list-disc pl-4 text-slate-400 space-y-0.5">
+                          {aiIntent.add?.map((item: string, i: number) => <li key={i}>{item}</li>)}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Generate Button */}
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
               disabled={!roomImage || processing}
               className="w-full py-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-600 rounded-xl font-bold text-sm uppercase tracking-widest shadow-lg shadow-violet-500/20 disabled:shadow-none transition-all active:scale-[0.98] flex items-center justify-center gap-3"
             >
@@ -337,10 +442,20 @@ export default function AIInteriorCopilot({ onBack }: { onBack: () => void, user
                 {/* Result */}
                 {resultImage && (
                   <div className="flex-1 max-w-2xl">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400 mb-3 text-center">AI Redesigned Room</div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400 mb-3 text-center">
+                      AI Redesigned Room {totalVariations > 1 && `(Variation ${currentPromptIndex + 1} of ${totalVariations})`}
+                    </div>
                     <div className="rounded-2xl overflow-hidden border border-emerald-500/20 shadow-2xl shadow-emerald-500/5 relative group">
                       <img src={resultImage} className="w-full object-contain max-h-[60vh]" alt="AI Result" />
-                      <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                        {totalVariations > 1 && (
+                          <button 
+                            onClick={() => handleGenerate((currentPromptIndex + 1) % totalVariations)}
+                            className="px-3 py-1.5 bg-violet-600/80 backdrop-blur-sm rounded-lg text-[10px] font-bold text-white flex items-center gap-2 border border-violet-400/30"
+                          >
+                            <RotateCcw size={12} /> Next Variation
+                          </button>
+                        )}
                         <button onClick={handleDownload} className="px-3 py-1.5 bg-black/60 backdrop-blur-sm rounded-lg text-[10px] font-bold text-white flex items-center gap-2 border border-white/10">
                           <Download size={12} /> Save
                         </button>

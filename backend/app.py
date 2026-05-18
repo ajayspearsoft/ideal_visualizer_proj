@@ -3157,6 +3157,102 @@ def leonardo_wait_for_result(generation_id):
         return None
 
 
+import base64
+
+@app.route('/api/ai-copilot-analyze', methods=['POST'])
+def ai_copilot_analyze():
+    """
+    AI Intent Analyzer for Interior Copilot.
+    Analyzes the uploaded image along with the user's prompt to generate a structured plan.
+    """
+    if not client:
+        return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 500
+
+    try:
+        if 'room_image' not in request.files:
+            return jsonify({'success': False, 'error': 'No room image uploaded'}), 400
+
+        room_file = request.files['room_image']
+        room_type = request.form.get('room_type', 'bedroom')
+        additional_prompt = request.form.get('additional_prompt', '')
+        custom_prompt = request.form.get('custom_prompt', '')
+
+        # Read and encode image to base64
+        image_bytes = room_file.read()
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        
+        # Reset file pointer so it can be read again if needed downstream
+        room_file.seek(0)
+
+        user_instruction = additional_prompt if additional_prompt else "Please analyze this room for redesign."
+        if room_type == 'other':
+            user_instruction = custom_prompt + " " + user_instruction
+
+        prompt_text = f"""
+        You are an expert AI Interior Design Architect specializing in Indian modular furniture and renovations.
+        Analyze this {room_type} image and the user's request.
+        User Request: "{user_instruction}"
+
+        CRITICAL DESIGN RULES TO FOLLOW:
+        1. MODULAR WARDROBES: If you see empty structural built-in shelves or niches in the walls, your primary intent MUST be to convert them into functional, modern wardrobes or cabinets by ADDING DOORS to them. Do not leave them as open shelves.
+        2. ESSENTIAL FURNITURE: If this is a bedroom and there is empty floor space, you MUST explicitly plan to add a large, comfortable bed. Identify an opposite or adjacent wall to add a sleek TV unit. An empty room is a failure.
+        3. NO RANDOM APPLIANCES: Do NOT add Air Conditioners (ACs) or other random wall appliances unless the user explicitly asks for them.
+        4. PRESERVATION: Identify fixed architectural elements like windows, structural columns, and the basic layout of the shelves (to wrap them in doors).
+
+        Identify the existing structures, empty spaces, and formulate a highly specific, surgical plan to fulfill these rules and the user's request efficiently. 
+        Perform a Deep Spatial Analysis: Before generating the JSON, think deeply about the precise placement of each item based on the existing room geometry. Where exactly should the bed go? How will the doors cover the shelves?
+        Respond ONLY with a JSON object in this exact format, with no markdown formatting or extra text:
+        {{
+            "preserve": ["list of architectural elements or existing furniture to keep untouched (e.g., window, empty shelves)"],
+            "add": ["list of items to add or modify (e.g., add doors to existing shelves, place a bed in the center)"],
+            "style": ["color scheme and style keywords"],
+            "reasoning": "A highly detailed, 4-5 sentence deep spatial analysis and logical reasoning of exactly how and where the furniture will be surgically integrated into the original room's geometry.",
+            "suggested_prompt": "A highly detailed, comma-separated prompt for an image generation model that captures the full new design."
+        }}
+        """
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+
+        result_text = response.choices[0].message.content.strip()
+        
+        # Clean up potential markdown formatting
+        if result_text.startswith("```json"):
+            result_text = result_text[7:]
+        if result_text.startswith("```"):
+            result_text = result_text[3:]
+        if result_text.endswith("```"):
+            result_text = result_text[:-3]
+            
+        result_json = json.loads(result_text.strip())
+
+        return jsonify({
+            'success': True,
+            'intent': result_json
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/ai-copilot-generate', methods=['POST'])
 def ai_copilot_generate_leonardo():
     """
@@ -3215,14 +3311,15 @@ def ai_copilot_generate_leonardo():
 
         # 3. DEPTH ESTIMATION (Spatial Conditioning)
         depth_data = None
+        depth_map_img = None
         if depth_engine:
             print("[LEONARDO COPILOT] Running Depth Estimation...", flush=True)
             try:
-                depth_map = depth_engine.generate_depth_map(original_cv)
-                depth_data = depth_engine.analyze_spatial_zones(depth_map)
+                depth_map_img = depth_engine.generate_depth_map(original_cv)
+                depth_data = depth_engine.analyze_spatial_zones(depth_map_img)
                 
                 # Save depth debug overlay
-                depth_overlay = depth_engine.create_depth_overlay(original_cv, depth_map)
+                depth_overlay = depth_engine.create_depth_overlay(original_cv, depth_map_img)
                 depth_path = os.path.join(app.config['UPLOAD_FOLDER'], f"debug_depth_{int(time.time())}.png")
                 cv2.imwrite(depth_path, depth_overlay)
                 
@@ -3243,11 +3340,14 @@ def ai_copilot_generate_leonardo():
             }
 
         # 4. PROMPT ORCHESTRATION
-        if room_type == "other":
-            final_prompt = custom_prompt if custom_prompt else "photoreal luxury interior"
+        prompt_index = int(request.form.get('prompt_index', -1))
+        prompts = ROOM_PROMPTS.get(room_type, ROOM_PROMPTS["bedroom"])
+        
+        if 0 <= prompt_index < len(prompts):
+            final_prompt = prompts[prompt_index]
         else:
-            prompts = ROOM_PROMPTS.get(room_type, ROOM_PROMPTS["bedroom"])
-            final_prompt = prompts[0]
+            final_prompt = random.choice(prompts)
+            prompt_index = prompts.index(final_prompt)
 
         # Add user's specific request if provided
         if additional_prompt and additional_prompt.strip() not in [".", ""]:
@@ -3256,13 +3356,15 @@ def ai_copilot_generate_leonardo():
         # 5. GENERATION & RESTORATION (Production Pipeline)
         print("[LEONARDO COPILOT] Triggering Production Pipeline...", flush=True)
         if generation_engine:
-            effective_strength = 0.13 if room_type == "bedroom" else 0.10
+            # Calibrated surgical strength for Fal.ai (0.80 for kitchens, 0.85 for bedrooms/others to allow modular cabinetry)
+            effective_strength = 0.80 if room_type == "kitchen" else 0.85
             final_composite, err = generation_engine.redesign_room(
                 original_image=original_cv,
                 style_prompt=final_prompt,
                 masks=masks,
                 image_strength=effective_strength,
                 depth_data=depth_data,
+                depth_map=depth_map_img,
             )
             
             if err:
@@ -3279,7 +3381,9 @@ def ai_copilot_generate_leonardo():
                 'success': True,
                 'result_url': public_url,
                 'message': 'AI room generated successfully via Production Pipeline',
-                'room_type': room_type
+                'room_type': room_type,
+                'prompt_index': prompt_index,
+                'total_variations': len(prompts)
             })
         else:
             return jsonify({'success': False, 'error': 'Generation Engine not initialized'}), 500

@@ -4,14 +4,11 @@ from typing import Dict, List
 ROOM_PROMPTS: Dict[str, List[str]] = {
     "bedroom": [
         (
-    "Photorealistic interior photography, Indian master bedroom, DSLR shot, natural daylight. King bed dark grey tufted upholstered headboard, vertical charcoal louvers slatted wood panels on the bed back wall, brown cushions, linen bedsheet, foreground lower frame. Full-wall closed modular wardrobe mint sage laminate shutters black slim handles bottom drawers. Illuminated mirror niche warm LED strip. Wall-mounted TV unit sage green. POP false ceiling cove lighting strips ceiling fan recessed spotlights. Large format white marble vitrified tile floor. Sheer curtains window. Beige cream walls. Premium Indian apartment, realistic textures, no CGI, no animation, photographic quality, 8k."
-),
-(
-    "Real photo Indian master bedroom, not render not illustration. King bed tufted fabric headboard grey, bed background wall with premium vertical wood louvers and slatted paneling, side tables, close to camera foreground. One full wall closed laminate wardrobe mint green shutters long black handles storage drawers. Dressing mirror niche LED backlit. TV panel wall mounted. POP ceiling fan warm cove light recessed spots. White marble floor tiles. Cream beige walls curtains window. Middle class premium Indian apartment interior, believable materials textures lighting, photorealistic 8k DSLR."
-),
-(
-    "Modern Indian apartment bedroom real photograph. Complete king bed upholstered headboard fabric grey, textured bed back wall with decorative louvers and warm LED strips, linen sheets cushions foreground. Closed full wall modular wardrobe sage mint laminate shutters handles drawers. Mirror niche warm glow TV unit. False POP ceiling indirect cove light ceiling fan spotlights. Vitrified marble look floor tiles. Soft beige ivory walls sheer curtains. Balanced practical layout warm ambient light realistic laminate fabric materials subtle decor, not CGI not animated not showroom, photographic quality 8k."
-),
+            "Ultra-realistic modern Indian bedroom interior renovation. Preserve exact same room geometry, walls, window, and floor tiles exactly. Add a king size bed with a clean modern white bedsheet. Convert any existing built-in open shelves or alcoves into premium modular wardrobes in a clean matte laminate finish with elegant vertical bronze handles, built flush into the wall cavities. Add a floating TV console unit. Add a sleek dark ceiling fan to the ceiling. Glossy white floor tiles remain exactly unchanged. DSLR architectural photography, photorealistic textures, vibrant bright lighting, highly detailed 8k."
+        ),
+        (
+            "Photorealistic Indian bedroom design. Preserve original room shape, exact wall positions, windows, and structural dimensions perfectly. Edit only by adding modular wardrobe systems with closed flat shutters and premium laminate finish over the shelf cavities. Place a premium bed with modern bedding aligned within the room layout on the floor footprint. Include a modern dark ceiling fan on the ceiling. Room size and perspective must remain completely unaltered. Highly realistic shadows, perfect perspective matching, DSLR quality, 8k resolution."
+        )
     ],
     "living_room": [
         (
@@ -27,14 +24,11 @@ ROOM_PROMPTS: Dict[str, List[str]] = {
     ],
     "kitchen": [
         (
-    "Photorealistic interior photography, modern Indian modular kitchen, DSLR. Solid modular base and wall cabinets charcoal grey, seamless black granite countertop, stainless steel sink and tap. Tiled backsplash, built-in oven and hob. POP false ceiling recessed spots. Large format floor tiles. Natural window light. Clean clutter-free layout, realistic materials, no CGI 8k."
-),
-(
-    "Real photo Indian kitchen, modular cabinets light wood finish, white marble countertop, built-in chimney. Strictly solid modular cabinetry, replace all open shelving with closed laminate shutters. Backlit backsplash, ceiling spotlights. Realistic textures, photographic quality, not a render 8k."
-),
-(
-    "Modern Indian kitchen real photograph. Solid base cabinets wood tone matte laminate. White matte overhead cabinets long vertical handles. Granite or composite countertop black grey. False ceiling with downlights. Beige white tile walls. Grey vitrified floor. Clean functional layout, realistic proportions, warm task lighting, photographic quality 8k."
-),
+            "Ultra-realistic modular kitchen renovation edit. Preserve the exact same room structure, shelf dimensions, ceiling, walls, floor tiles, and camera angle. Convert open white shelves into simple Indian-style modular shutters by adding thin pastel light green matte laminate panel doors over the shelves, keeping original divisions. Add a black ceiling fan at the top, and a realistic modern stainless steel refrigerator fitted neatly into the right-side empty wall area near the switchboard. On the black stone countertop, place a modern Indian gas stove/hob. The top horizontal open loft storage remains divided into 2-3 open compartments. Keep some shelves partially visible for a realistic display look. Add subtle warm LED lighting inside a few open shelf sections. DSLR real-estate photography style, soft realistic shadows, highly detailed matte textures, 8k resolution, authentic Indian modular kitchen."
+        ),
+        (
+            "Ultra-realistic Indian modular kitchen design edit. Convert existing white shelves to modular cabinetry with soft mint green and matte light green laminate panel doors. Keep original shelf divisions, camera angle, and walls identical. Mount a sleek black ceiling fan to the top ceiling. Fit a double-door modern metallic refrigerator perfectly into the right wall recess. Place an Indian multi-burner gas stove on the black stone counter. Leave some middle shelves open for display, illuminated by warm subtle interior LED lights. Top horizontal storage sections remain open compartments. Photo-realistic renovation, DSLR architectural photography, soft natural lighting and realistic depth, 8k."
+        )
     ],
     "bathroom": [
         (
@@ -60,8 +54,8 @@ ROOM_PRESETS: Dict[str, str] = {
     "Real photo Indian bedroom, large bed with upholstered headboard grey fabric cushions pillows. Full wall modular wardrobe closed shutters dark wood matte finish vertical handles. TV unit niche with mounted TV white laminate base cabinet. False POP ceiling white beige dual tone with warm LED cove lighting ceiling fan recessed spotlights. Light grey beige vitrified floor tiles marble look. Pastel walls sheer curtains window. Premium middle class Indian bedroom, realistic laminate and fabric materials, not animated not CGI not closet display, preserve room geometry, photorealistic 8k DSLR."
 ),
     "kitchen": (
-    "Real photo Indian kitchen, DSLR shot, bright natural daylight. L-shaped modular kitchen layout. Base cabinets dark wood laminate grey matte shutters. Overhead white matte laminate cabinets vertical handles. Countertop black granite. Stainless steel sink faucet. Chimney over hob hob not fully visible. Under cabinet LED strips. Storage drawers cabinets. Small appliances mixer grinder toaster microwave on counter. Grey vitrified tile floor. White beige walls. Clean organized practical Indian kitchen, realistic textures, not CGI, photographic quality 8k."
-),
+        "Real photo Indian modular kitchen, DSLR shot, bright natural daylight. Convert existing open white shelves to simple Indian-style modular shutters with thin light green matte laminate panel doors. Keep original divisions. Add a sleek black ceiling fan to the top ceiling. Fit a modern stainless steel refrigerator perfectly into the right wall area near the switchboard. Place a realistic Indian gas stove on the black stone countertop. The top horizontal open loft storage remains divided into 2-3 open compartments, and some shelves are left partially open showing items with subtle warm interior LED lighting. Clean organized Indian modular kitchen, realistic matte textures, no CGI, photorealistic 8k DSLR."
+    ),
     "bathroom": (
     "Real photo Indian bathroom, bright natural daylight. White vanity with countertop sink faucet mirror above. Wall mounted mirror with warm LED strip light. Glass shower cubicle with frosted glass panel showerhead. Wall tiles white marble look matte finish. Floor tiles darker grey matte anti-skid. Ceiling with false POP white cove lights downlights exhaust fan. Sanitary fittings white ceramic WC bidet. Towel rail accessories. Small bathroom, practical layout, premium Indian apartment style, realistic textures, not CGI, photographic quality 8k."
 ),

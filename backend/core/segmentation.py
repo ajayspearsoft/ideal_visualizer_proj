@@ -59,11 +59,12 @@ class SegmentationEngine:
         protected_mask = np.zeros((h, w), dtype=np.uint8)
         
         # 1. HARD GEOMETRY LOCK (via Canny Skeleton)
-        if skeleton is not None:
-            print("[CANNY] Geometry lock applied to protected mask.", flush=True)
-            # Dilate edges slightly to create a safety 'buffer' around junctions
-            dilated_skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
-            protected_mask = cv2.bitwise_or(protected_mask, dilated_skeleton)
+        # DISABLED: The Canny skeleton forcefully hardcodes the lines of the EMPTY room
+        # and draws them over the AI's new furniture, creating terrible white 'ghost lines'.
+        # if skeleton is not None and room_type.strip().lower() != "kitchen":
+        #     print("[CANNY] Geometry lock applied to protected mask.", flush=True)
+        #     dilated_skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
+        #     protected_mask = cv2.bitwise_or(protected_mask, dilated_skeleton)
         
         # 1. ARCHITECTURAL PROTECTION (via SegFormer)
         if self.scene_model and self.scene_processor:
@@ -76,68 +77,88 @@ class SegmentationEngine:
                     logits, size=image.shape[:2], mode='bilinear', align_corners=False
                 )
                 seg_map = upsampled_logits.argmax(dim=1)[0].numpy()
+                y_grid, x_grid = np.indices((h, w))
                 
-                # Protect: Ceiling (4), Windows (9), Doors (15)
-                # Walls (1) are partially protected (we lock the junction but allow face editing)
-                for ade_id in [4, 9, 15]:
-                    protected_mask[seg_map == ade_id] = 255
+                # Extract High-Precision Spatial Surgical Zones to unprotect
+                if room_type.strip().lower() == "kitchen":
+                    # Fridge zone (right wall, lower/mid)
+                    fridge_zone = (x_grid > w * 0.65) & (y_grid > h * 0.2)
+                    # Shelf zone (left/center wall, mid)
+                    shelf_zone = (x_grid < w * 0.65) & (y_grid > h * 0.15)
+                else:
+                    # BEDROOM/LIVING ROOM Surgical Bounded Zones
+                    # 1. High-precision central bed footprint (keep margins to avoid warping walls/floor edges)
+                    floor_zone = (x_grid > w * 0.20) & (x_grid < w * 0.78) & (y_grid > h * 0.60) & (y_grid < h * 0.95)
+                    
+                    # 2. High-precision left wall wardrobe/shelves cavity (keep top/bottom wall borders safe)
+                    left_wall_zone = (x_grid > w * 0.05) & (x_grid < w * 0.42) & (y_grid > h * 0.20) & (y_grid < h * 0.85)
+                    
+                    # 3. High-precision under window TV/cabinet slab zone
+                    window_under_zone = (x_grid > w * 0.48) & (x_grid < w * 0.78) & (y_grid > h * 0.50) & (y_grid < h * 0.88)
 
         # 2. OBJECT DETECTION (via YOLO)
+        detected_sinks_or_toilets = np.zeros((h, w), dtype=np.uint8)
         if self.yolo:
             results = self.yolo.predict(image, conf=0.25, verbose=False, device=self.device)
             if results[0].masks is not None:
                 for i, mask_data in enumerate(results[0].masks.xy):
                     cls_id = int(results[0].boxes.cls[i])
                     label = self.yolo.names[cls_id].lower()
-                    
-                    # If YOLO detects something that should be protected (like a permanent sink)
                     if 'sink' in label or 'toilet' in label:
                         mask_poly = np.array(mask_data, dtype=np.int32)
-                        temp_mask = np.zeros((h, w), dtype=np.uint8)
-                        cv2.fillPoly(temp_mask, [mask_poly], 255)
-                        protected_mask = cv2.bitwise_or(protected_mask, temp_mask)
+                        cv2.fillPoly(detected_sinks_or_toilets, [mask_poly], 255)
 
-        # 3. THE INVERSE STRATEGY (The AI Playground)
-        editable_mask = np.ones((h, w), dtype=np.uint8) * 255
-        editable_mask[protected_mask > 0] = 0
+        # 3. THE DIRECT SURGICAL INSERTION STRATEGY
+        # Start with a fully protected room (0 editable pixels)
+        editable_mask = np.zeros((h, w), dtype=np.uint8)
         
-        # Safety Margin: Protect the very top of the room (Ceiling)
-        protected_mask[:int(h*0.08), :] = 255
-        editable_mask[:int(h*0.08), :] = 0
+        # Surgically open up ONLY specific placement rectangles
+        if room_type.strip().lower() == "kitchen":
+            if 'fridge_zone' in locals():
+                editable_mask[fridge_zone] = 255
+            if 'shelf_zone' in locals():
+                editable_mask[shelf_zone] = 255
+        else:
+            if 'floor_zone' in locals():
+                editable_mask[floor_zone] = 255
+            if 'left_wall_zone' in locals():
+                editable_mask[left_wall_zone] = 255
+            if 'window_under_zone' in locals():
+                editable_mask[window_under_zone] = 255
 
-        # 1. Base Editable Zone (Start with almost full room)
-        editable_mask = np.ones((h, w), dtype=np.uint8) * 255
-        
-        # 2. Subtract Structural Boundaries
-        editable_mask[protected_mask > 0] = 0
-        
-        # 3. Create 'Furniture Placement Zone' (Central Focus)
-        # We allow more creativity in the bottom-middle of the room
-        creative_margin_w = int(w * 0.1)
-        creative_margin_h = int(h * 0.15)
-        central_zone = np.zeros((h, w), dtype=np.uint8)
-        cv2.rectangle(central_zone, (creative_margin_w, creative_margin_h), (w - creative_margin_w, h), 255, -1)
-        
-        # Combine masks
-        editable_mask = cv2.bitwise_or(editable_mask, central_zone)
-        editable_mask[protected_mask > 0] = 0 # Final architectural safety check
+        # 4. HARD ARCHITECTURAL ENFORCEMENT & EDGE SANITIZATION
+        if self.scene_model and self.scene_processor:
+            # 100% locked ceiling, windows, and doors
+            editable_mask[seg_map == 5] = 0  # 100% lock ceiling (prevents fan/light hallucinations)
+            editable_mask[seg_map == 8] = 0  # 100% lock windows
+            editable_mask[seg_map == 14] = 0 # 100% lock doors
+            
+        # Protect permanent bathroom/kitchen structures detected by YOLO
+        editable_mask[detected_sinks_or_toilets > 0] = 0
 
-        # 4. REFINEMENT
-        editable_mask = cv2.erode(editable_mask, np.ones((7, 7), np.uint8), iterations=1)
-        editable_mask = self._apply_room_type_prior(editable_mask, room_type)
-        editable_mask_final = cv2.GaussianBlur(editable_mask, (13, 13), 0)
+        # Protect image edges to maintain framing stability
+        editable_mask[:int(h * 0.12), :] = 0  # Lock top ceiling boundary
+        editable_mask[int(h * 0.96):, :] = 0  # Lock bottom skirting boundary
+        editable_mask[:, :int(w * 0.04)] = 0  # Lock left wall framing
+        editable_mask[:, int(w * 0.96):] = 0  # Lock right wall framing
 
-        # 5. Metrics & Diagnostics
+        # 5. REFINEMENT & BLENDING
+        # Keep the mask binary and un-eroded to give the AI maximum editable freedom inside the target regions
+        editable_mask_final = editable_mask
+        
+        # Protected mask is the exact inverse of our surgical edit mask
+        protected_mask = cv2.bitwise_not(editable_mask)
+
+        # Metrics & Diagnostics
         total_pixels = h * w
         prot_perc = (np.sum(protected_mask == 255) / total_pixels) * 100
         edit_perc = (np.sum(editable_mask > 0) / total_pixels) * 100
 
-        print(f"\n--- [GEOMETRY ENGINE METRICS] ---")
-        print(f"[PROTECTED AREA %]: {prot_perc:.1f}%")
-        print(f"[EDITABLE AREA %]: {edit_perc:.1f}%")
-        print(f"[MASK COVERAGE]: {edit_perc:.1f}%")
+        print(f"\n--- [SURGICAL GEOMETRY ENGINE METRICS] ---")
+        print(f"[PROTECTED ROOM IDENTIFY %]: {prot_perc:.1f}%")
+        print(f"[SURGICAL INPAINT ZONE %]: {edit_perc:.1f}%")
 
-        # 6. Distance Transform (Structural Blending)
+        # Distance Transform for smooth edge transparency blending
         dist_transform = cv2.distanceTransform(editable_mask, cv2.DIST_L2, 5)
         cv2.normalize(dist_transform, dist_transform, 0, 1.0, cv2.NORM_MINMAX)
         alpha_mask = cv2.GaussianBlur(dist_transform, (15, 15), 0)
